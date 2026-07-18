@@ -132,6 +132,11 @@ class MahsulotViewSet(viewsets.ModelViewSet):
         if not product_ids or not isinstance(product_ids, list):
             return Response({"detail": "Mahsulotlar ro'yxati ('product_ids') yuborilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # MED-7: Limit bulk operations to prevent DoS
+        MAX_BULK_IDS = 500
+        if len(product_ids) > MAX_BULK_IDS:
+            return Response({"detail": f"Bir vaqtda eng ko'pi bilan {MAX_BULK_IDS} ta mahsulot tanlanishi mumkin."}, status=status.HTTP_400_BAD_REQUEST)
+
         user = request.user
         if not user.is_superuser and user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
             biznes = user.xodim.biznes

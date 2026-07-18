@@ -11,6 +11,12 @@ from decimal import Decimal
 def validate_image_size(value):
     if not value:
         return
+    # LOW-5: Fayl kengaytmasini tekshirish
+    import os
+    ext = os.path.splitext(value.name)[1].lower()
+    allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+    if ext not in allowed_extensions:
+        raise ValidationError(f"Faqat rasm fayllari ruxsat etiladi ({', '.join(allowed_extensions)}).")
     limit = 5 * 1024 * 1024
     if value.size > limit:
         raise ValidationError("Rasm hajmi 5MB dan oshmasligi kerak.")
@@ -210,7 +216,7 @@ class Import(BaseModel):
 
         rows = []
         if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True)
+            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
             sheet = wb.active
             for row in sheet.iter_rows(values_only=True):
                 if any(x is not None for x in row):
@@ -690,7 +696,7 @@ class Transfer(BaseModel):
 
         rows = []
         if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True)
+            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
             sheet = wb.active
             for row in sheet.iter_rows(values_only=True):
                 if any(x is not None for x in row):

@@ -229,7 +229,7 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
         rows = []
         if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True)
+            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
             sheet = wb.active
             for row in sheet.iter_rows(values_only=True):
                 if any(x is not None for x in row):

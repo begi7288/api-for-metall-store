@@ -95,11 +95,7 @@ class ImportViewSet(viewsets.ModelViewSet):
             'holat': import_obj.holat
         }, status=status.HTTP_200_OK)
 
-    def get_permissions(self):
-        from rest_framework.permissions import AllowAny
-        if self.action == 'template':
-            return [AllowAny()]
-        return super().get_permissions()
+    # HIGH-5: AllowAny olib tashlandi — template ham autentifikatsiya talab qiladi
 
     @action(detail=False, methods=['get'])
     def template(self, request):

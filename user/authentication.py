@@ -5,10 +5,12 @@ from datetime import timedelta
 
 class ExpiringTokenAuthentication(TokenAuthentication):
     """
-    Custom Token Authentication backend that enforces a 12-hour Token TTL.
+    Custom Token Authentication backend that enforces a 6-hour Token TTL.
     Expired tokens are automatically removed from the database when used,
     forcing the user to re-authenticate.
     """
+    TOKEN_TTL_HOURS = 6
+
     def authenticate_credentials(self, key):
         model = self.get_model()
         try:
@@ -22,9 +24,9 @@ class ExpiringTokenAuthentication(TokenAuthentication):
         if hasattr(token.user, 'xodim') and not token.user.xodim.is_active:
             raise exceptions.AuthenticationFailed("Ushbu xodim faol emas.")
 
-        # Check if the token has expired (TTL = 12 hours)
+        # Check if the token has expired (MED-2: TTL = 6 hours)
         utc_now = timezone.now()
-        if token.created < utc_now - timedelta(hours=12):
+        if token.created < utc_now - timedelta(hours=self.TOKEN_TTL_HOURS):
             token.delete()
             raise exceptions.AuthenticationFailed("Token muddati tugagan. Qaytadan tizimga kiring.")
 

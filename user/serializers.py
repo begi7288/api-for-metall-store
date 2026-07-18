@@ -212,38 +212,47 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         from user.models import Biznes, Tarif
         from products.models import Dokon
-        biznes_nomi = validated_data.pop('biznes_nomi', None)
-        ism = validated_data.get('ism', 'Foydalanuvchi')
-        if not biznes_nomi:
-            biznes_nomi = f"{ism}ning Biznesi"
-            
-        tarif = Tarif.objects.first()
-        if not tarif:
-            tarif = Tarif.objects.create(nomi="Bepul tarif", dokon_limiti=2, mahsulot_limiti=100, xodim_limiti=3)
-            
-        biznes = Biznes.objects.create(
-            nomi=biznes_nomi,
-            egasi_ism=ism,
-            tarif=tarif
-        )
-        
-        # Create a default store/warehouse for the new business
-        Dokon.objects.create(
-            biznes=biznes,
-            nomi=f"{biznes_nomi} do'koni"
-        )
+        from django.db import transaction
 
-        # Create standard catalog fields as shown in catalog settings
-        from products.models import XususiyatMaydoni
-        XususiyatMaydoni.objects.create(biznes=biznes, nomi="Shtrix-kod", tur="matn")
-        XususiyatMaydoni.objects.create(biznes=biznes, nomi="Tovar nomi", tur="matn")
-        
-        validated_data['biznes'] = biznes
-        validated_data['is_active'] = True
-        validated_data['rol'] = 'admin'
-        validated_data['familiya'] = 'Foydalanuvchi'
-        validated_data['jinsi'] = 'erkak'
-        return Xodim.objects.create(**validated_data)
+        # MED-4: transaction.atomic — race condition oldini olish
+        with transaction.atomic():
+            # Re-check phone uniqueness inside the transaction
+            telefon_raqam = validated_data.get('telefon_raqam')
+            if telefon_raqam and Xodim.objects.select_for_update().filter(telefon_raqam=telefon_raqam).exists():
+                raise serializers.ValidationError({'telefon_raqam': "Ushbu telefon raqami allaqachon ro'yxatdan o'tkazilgan."})
+
+            biznes_nomi = validated_data.pop('biznes_nomi', None)
+            ism = validated_data.get('ism', 'Foydalanuvchi')
+            if not biznes_nomi:
+                biznes_nomi = f"{ism}ning Biznesi"
+                
+            tarif = Tarif.objects.first()
+            if not tarif:
+                tarif = Tarif.objects.create(nomi="Bepul tarif", dokon_limiti=2, mahsulot_limiti=100, xodim_limiti=3)
+                
+            biznes = Biznes.objects.create(
+                nomi=biznes_nomi,
+                egasi_ism=ism,
+                tarif=tarif
+            )
+            
+            # Create a default store/warehouse for the new business
+            Dokon.objects.create(
+                biznes=biznes,
+                nomi=f"{biznes_nomi} do'koni"
+            )
+
+            # Create standard catalog fields as shown in catalog settings
+            from products.models import XususiyatMaydoni
+            XususiyatMaydoni.objects.create(biznes=biznes, nomi="Shtrix-kod", tur="matn")
+            XususiyatMaydoni.objects.create(biznes=biznes, nomi="Tovar nomi", tur="matn")
+            
+            validated_data['biznes'] = biznes
+            validated_data['is_active'] = True
+            validated_data['rol'] = 'admin'
+            validated_data['familiya'] = 'Foydalanuvchi'
+            validated_data['jinsi'] = 'erkak'
+            return Xodim.objects.create(**validated_data)
 
 
 class BiznesSerializer(XSSSanitizerMixin, serializers.ModelSerializer):

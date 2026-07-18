@@ -1826,4 +1826,162 @@ class TaminotchiAPITestCase(APITestCase):
         self.assertEqual(len(response.data), 0)
 
 
+class CompleteSystemWorkflowTestCase(APITestCase):
+    """
+    Multi-stage end-to-end integration test verifying the entire business flow:
+    Registration -> Login -> Supplier & Store Setup -> Product Catalog -> Purchasing Order ->
+    Receiving Inventory -> Balances & Payments -> Write-off -> Verification.
+    """
+
+    def test_complete_business_flow(self):
+        from user.models import Xodim, Biznes
+        from products.models import Mahsulot, Dokon, DokonQoldiq, WriteOff
+        from orders.models import Taminotchi, SupplierOrder, SupplierOrderItem, SupplierOrderPayment
+        
+        # STAGE 1: Register new business and user
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "Bekzod",
+            "telefon_raqam": "+998909876543",
+            "parol": "SecurePass123!",
+            "parolni_tasdiqlash": "SecurePass123!",
+            "biznes_nomi": "Temir Invest"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        # Verify default entities created automatically by register API
+        xodim = Xodim.objects.get(telefon_raqam="+998909876543")
+        biznes = xodim.biznes
+        self.assertIsNotNone(biznes)
+        
+        # Verify a default Dokon was created automatically in the register flow
+        self.assertTrue(Dokon.objects.filter(biznes=biznes).exists())
+        dokon = Dokon.objects.filter(biznes=biznes).first()
+
+        # STAGE 2: Add a new supplier (Taminotchi)
+        supplier_url = reverse('suppliers-list')
+        sup_payload = {
+            "nomi": "Metal Snab",
+            "telefon_raqam": "+998935555555"
+        }
+        sup_response = self.client.post(supplier_url, sup_payload, format='json')
+        self.assertEqual(sup_response.status_code, status.HTTP_201_CREATED)
+        supplier_id = sup_response.data['id']
+        taminotchi = Taminotchi.objects.get(id=supplier_id)
+
+        # STAGE 3: Create a new product (Mahsulot) in the catalog
+        product_url = reverse('mahsulot-list')
+        prod_payload = {
+            "nomi": "Armatura A500C",
+            "olchov_birligi": "metr",
+            "kelish_narxi": "8000.00",
+            "sotish_narxi": "12000.00",
+            "miqdori": 0,
+            "qoldiqlar": [
+                {
+                    "dokon": dokon.id,
+                    "miqdori": 0,
+                    "ogohlantirish": 0
+                }
+            ]
+        }
+        prod_response = self.client.post(product_url, prod_payload, format='json')
+        self.assertEqual(prod_response.status_code, status.HTTP_201_CREATED)
+        product_id = prod_response.data['id']
+        mahsulot = Mahsulot.objects.get(id=product_id)
+
+        # STAGE 4: Place a Supplier Order (Draft)
+        order_url = reverse('supplier-order-list')
+        order_payload = {
+            "taminotchi": supplier_id,
+            "dokon": dokon.id,
+            "nomi": "Birinchi O'tkazma",
+            "qabul_qilish_sanasi": "2026-07-20",
+            "elementlar": [
+                {
+                    "mahsulot": product_id,
+                    "miqdori": 100,
+                    "kelish_narxi": "8000.00",
+                    "sotish_narxi": "12000.00"
+                }
+            ]
+        }
+        order_response = self.client.post(order_url, order_payload, format='json')
+        self.assertEqual(order_response.status_code, status.HTTP_201_CREATED)
+        order_id = order_response.data['id']
+        order = SupplierOrder.objects.get(id=order_id)
+        self.assertEqual(order.holat, 'qoralama')
+
+        # STAGE 5: Confirm / Rasmiylashtirish the Order
+        confirm_url = reverse('supplier-order-confirm', kwargs={'pk': order_id})
+        conf_response = self.client.post(confirm_url, format='json')
+        self.assertEqual(conf_response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.assertEqual(order.holat, 'rasmiylashtirilgan')
+
+        # STAGE 6: Receive / Qabul qilish the inventory
+        receive_url = reverse('supplier-order-receive', kwargs={'pk': order_id})
+        rec_response = self.client.post(receive_url, {"apply_new_prices": True}, format='json')
+        self.assertEqual(rec_response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.assertEqual(order.holat, 'qabul_qilingan')
+
+        # Verify stock updates
+        mahsulot.refresh_from_db()
+        self.assertEqual(mahsulot.miqdori, 100)
+        qoldiq = DokonQoldiq.objects.get(mahsulot=mahsulot, dokon=dokon)
+        self.assertEqual(qoldiq.miqdori, 100)
+
+        # STAGE 7: Supplier Debt and Payment check
+        taminotchi.refresh_from_db()
+        self.assertEqual(order.nasiya_summa, Decimal('800000.00')) # 100 * 8000
+        
+        # Pay 300,000 UZS to the supplier order
+        pay_url = reverse('supplier-order-pay', kwargs={'pk': order_id})
+        pay_payload = {
+            "amount": "300000.00",
+            "tolov_turi": "naqd"
+        }
+        pay_response = self.client.post(pay_url, pay_payload, format='json')
+        self.assertEqual(pay_response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.assertEqual(order.tolangan_summa, Decimal('300000.00'))
+        self.assertEqual(order.nasiya_summa, Decimal('500000.00'))
+
+        # STAGE 8: Write-off 10 items due to defect
+        write_off_list_url = reverse('write-off-list')
+        wo_payload = {
+            "nomi": "Defekt tovarlarni hisobdan chiqarish",
+            "dokon": dokon.id,
+            "sababi": "defekt",
+            "elementlar": [
+                {
+                    "mahsulot": product_id,
+                    "miqdori": 10,
+                    "kelish_narxi": "8000.00"
+                }
+            ]
+        }
+        wo_response = self.client.post(write_off_list_url, wo_payload, format='json')
+        self.assertEqual(wo_response.status_code, status.HTTP_201_CREATED)
+        wo_id = wo_response.data['id']
+        write_off = WriteOff.objects.get(id=wo_id)
+        self.assertEqual(write_off.holat, 'qoralama')
+
+        # Confirm the write-off to deduct stock
+        wo_confirm_url = reverse('write-off-confirm', kwargs={'pk': wo_id})
+        wo_conf_response = self.client.post(wo_confirm_url, format='json')
+        self.assertEqual(wo_conf_response.status_code, status.HTTP_200_OK)
+
+        # Verify final stocks (100 - 10 = 90)
+        mahsulot.refresh_from_db()
+        self.assertEqual(mahsulot.miqdori, 90)
+        qoldiq.refresh_from_db()
+        self.assertEqual(qoldiq.miqdori, 90)
+
+
+
 

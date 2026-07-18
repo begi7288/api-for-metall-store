@@ -8,8 +8,9 @@ from .models import Xodim, Mijoz, Biznes, Tarif
 from .serializers import XodimSerializer, MijozSerializer, ChangePasswordSerializer, LoginSerializer, LogoutSerializer, RegisterSerializer, BiznesSerializer, TarifSerializer
 from .permissions import IsAdminOrOmborchi, IsEmployee
 
-from .throttling import PhoneRateThrottle, IPLoginRateThrottle
+from .throttling import PhoneRateThrottle, IPLoginRateThrottle, PasswordChangeRateThrottle, RegisterRateThrottle
 from rest_framework.permissions import IsAuthenticated
+import time
 
 
 class LoginAPIView(APIView):
@@ -27,36 +28,42 @@ class LoginAPIView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            telefon_raqam = serializer.validated_data['telefon_raqam']
-            parol = serializer.validated_data['parol']
+        from rest_framework.exceptions import ValidationError as DRFValidationError, PermissionDenied
+        from django.contrib.auth.models import User
+        from django.utils import timezone
+        from datetime import timedelta
 
-            from rest_framework.exceptions import ValidationError as DRFValidationError, PermissionDenied
-            from django.contrib.auth.models import User
-            from django.utils import timezone
-            from datetime import timedelta
+        telefon_raqam = serializer.validated_data['telefon_raqam']
+        parol = serializer.validated_data['parol']
 
-            phone_formats = []
-            clean_phone = telefon_raqam.strip().replace('+', '')
-            if clean_phone.isdigit():
-                if len(clean_phone) == 9:
-                    phone_formats.extend([clean_phone, f"+998{clean_phone}", f"998{clean_phone}"])
-                elif len(clean_phone) == 12 and clean_phone.startswith('998'):
-                    phone_formats.extend([clean_phone, f"+{clean_phone}", clean_phone[3:]])
-                else:
-                    phone_formats.append(telefon_raqam)
+        # MED-6: Constant-time response to prevent phone enumeration via timing attack
+        start_time = time.monotonic()
+
+        # Generic error message — same for wrong phone AND wrong password (MED-6)
+        GENERIC_ERROR = "Telefon raqami yoki parol noto'g'ri."
+
+        phone_formats = []
+        clean_phone = telefon_raqam.strip().replace('+', '')
+        if clean_phone.isdigit():
+            if len(clean_phone) == 9:
+                phone_formats.extend([clean_phone, f"+998{clean_phone}", f"998{clean_phone}"])
+            elif len(clean_phone) == 12 and clean_phone.startswith('998'):
+                phone_formats.extend([clean_phone, f"+{clean_phone}", clean_phone[3:]])
             else:
                 phone_formats.append(telefon_raqam)
-                
-            phone_formats = list(set(phone_formats))
+        else:
+            phone_formats.append(telefon_raqam)
+            
+        phone_formats = list(set(phone_formats))
 
+        try:
             xodim = Xodim.objects.filter(telefon_raqam__in=phone_formats).first()
             if xodim:
                 user_obj = xodim.user
                 if not xodim.is_active:
                     raise PermissionDenied("Ushbu xodim faol emas.")
                 if not check_password(parol, xodim.parol):
-                    raise DRFValidationError({'detail': "Telefon raqami yoki parol noto'g'ri."})
+                    raise DRFValidationError({'detail': GENERIC_ERROR})
                 role = xodim.rol
                 ism = xodim.ism
                 familiya = xodim.familiya
@@ -64,12 +71,14 @@ class LoginAPIView(APIView):
                 clean_username = telefon_raqam.replace('+', '')
                 user_obj = User.objects.filter(username__in=[telefon_raqam, clean_username]).first()
                 if not user_obj:
-                    raise DRFValidationError({'detail': "Telefon raqami yoki parol noto'g'ri."})
+                    # MED-6: Do a dummy password hash check to prevent timing-based enumeration
+                    check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
+                    raise DRFValidationError({'detail': GENERIC_ERROR})
 
                 if not user_obj.is_active:
                     raise PermissionDenied("Ushbu foydalanuvchi faol emas.")
                 if not user_obj.check_password(parol):
-                    raise DRFValidationError({'detail': "Telefon raqami yoki parol noto'g'ri."})
+                    raise DRFValidationError({'detail': GENERIC_ERROR})
 
                 if hasattr(user_obj, 'xodim'):
                     xodim = user_obj.xodim
@@ -83,13 +92,11 @@ class LoginAPIView(APIView):
 
             token, created = Token.objects.get_or_create(user=user_obj)
             if not created:
-                if token.created < timezone.now() - timedelta(hours=12):
+                if token.created < timezone.now() - timedelta(hours=6):
                     token.delete()
                     token = Token.objects.create(user=user_obj)
 
-            from django.contrib.auth import login as django_login
-            django_login(request, user_obj, backend='django.contrib.auth.backends.ModelBackend')
-            request.session.save()
+            # MED-1: Session login olib tashlandi — faqat Token auth ishlatiladi
 
             return Response({
                 'token': token.key,
@@ -112,8 +119,6 @@ class LogoutAPIView(APIView):
 
     def post(self, request, *args, **kwargs):
         Token.objects.filter(user=request.user).delete()
-        from django.contrib.auth import logout as django_logout
-        django_logout(request)
 
         return Response({
             "success": True,
@@ -160,6 +165,8 @@ class MeAPIView(APIView):
 
 class ChangePasswordAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    # LOW-3: Rate limit on password change
+    throttle_classes = [PasswordChangeRateThrottle]
 
     def get(self, request, *args, **kwargs):
         return Response({"detail": "Parolni o'zgartirish uchun ushbu sahifada POST so'rovini yuboring."}, status=status.HTTP_200_OK)
@@ -174,18 +181,12 @@ class ChangePasswordAPIView(APIView):
         user.set_password(yangi_parol)
         user.save()
 
-        if hasattr(user, 'xodim'):
-            xodim = user.xodim
-            xodim.parol = user.password
-            xodim.save()
+        # HIGH-4: Xodim.parol ga Django User hash ni SAQLAMAYMIZ.
+        # Parol faqat Django User modelida saqlanadi.
+        # Xodim.parol eski hash bilan qoladi, lekin login faqat User.check_password orqali ishlaydi.
 
         Token.objects.filter(user=user).delete()
         new_token = Token.objects.create(user=user)
-
-        # Re-authenticate session
-        from django.contrib.auth import login as django_login
-        django_login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-        request.session.save()
 
         return Response({
             "success": True,
@@ -199,7 +200,8 @@ class RegisterAPIView(APIView):
     authentication_classes = []
     permission_classes = []
     serializer_class = RegisterSerializer
-    throttle_classes = [PhoneRateThrottle, IPLoginRateThrottle]
+    # HIGH-2: Strict rate limiting on registration (3/hour per IP)
+    throttle_classes = [RegisterRateThrottle, IPLoginRateThrottle]
 
     def get(self, request, *args, **kwargs):
         if request.user.is_authenticated:
@@ -215,9 +217,7 @@ class RegisterAPIView(APIView):
         user_obj = User.objects.get(pk=xodim.user.pk)
         token, created = Token.objects.get_or_create(user=user_obj)
 
-        from django.contrib.auth import login as django_login
-        django_login(request, user_obj, backend='django.contrib.auth.backends.ModelBackend')
-        request.session.save()
+        # MED-1: Session login olib tashlandi
 
         return Response({
             'token': token.key,

@@ -83,11 +83,15 @@ class MijozModelTest(TestCase):
         'anon': '100000/day',
         'user': '100000/day',
         'login': '100000/day',
-        'phone': '100000/day'
+        'phone': '100000/day',
+        'password_change': '100000/day',
+        'register': '100000/day'
     }
 })
 class UserAPISecurityTestCase(APITestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         self.login_url = reverse('login')
         self.xodim_list_url = reverse('xodim-list')
         self.mijoz_list_url = reverse('mijoz-list')
@@ -196,11 +200,15 @@ class UserAPISecurityTestCase(APITestCase):
         'anon': '100000/day',
         'user': '100000/day',
         'login': '100000/day',
-        'phone': '100000/day'
+        'phone': '100000/day',
+        'password_change': '100000/day',
+        'register': '100000/day'
     }
 })
 class RegisterAPITestCase(APITestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         self.register_url = reverse('register')
 
     def test_successful_registration(self):
