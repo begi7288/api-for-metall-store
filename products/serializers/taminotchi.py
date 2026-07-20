@@ -7,6 +7,11 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     boshliq = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
     boshliq_ismi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
     boshliqIsmi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    boshliq_nomi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    boshliqNomi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    director = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    director_name = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    directorName = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
     manzil = serializers.CharField(source='yuridik_manzil', required=False, allow_null=True, allow_blank=True)
     telefon = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
     tel_raqami = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
@@ -24,7 +29,8 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         model = Taminotchi
         fields = [
             'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telRaqami', 'telefon_raqam', 'telefonlar', 'standart_ustama',
-            'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'yuridik_nomi', 'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
+            'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'boshliq_nomi', 'boshliqNomi', 'director', 'director_name', 'directorName', 'yuridik_nomi',
+            'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
             'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'balans',
             'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni'
         ]

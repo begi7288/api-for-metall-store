@@ -9,8 +9,8 @@ def sanitize_input(value):
         return value
     # Strip HTML tags
     clean_val = re.sub(r'<[^>]*>', '', value)
-    # Escape HTML entities
-    return html.escape(clean_val).strip()
+    # Escape HTML entities, but preserve quotes
+    return html.escape(clean_val, quote=False).strip()
 
 class XSSSanitizerMixin:
     def to_internal_value(self, data):
