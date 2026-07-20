@@ -1,4 +1,4 @@
-# API Endpoints List
+# API Endpoints List (Complete)
 
 Base URL: `https://metall-store-api.onrender.com`
 
@@ -6,7 +6,7 @@ Base URL: `https://metall-store-api.onrender.com`
 
 ## 1. Authentication & User Management (Prefix: `/users/`)
 
-### Register
+### Register (Sign Up)
 * **URL:** `https://metall-store-api.onrender.com/users/register/`
 * **Method:** `POST`
 * **Body:**
@@ -17,9 +17,9 @@ Base URL: `https://metall-store-api.onrender.com`
     "biznes_nomi": "Alining Biznesi"
   }
   ```
-  *(Note: Password is auto-generated and sent to Telegram bot)*
+  *(Note: 6-digit verification code is generated and sent to Telegram bot)*
 
-### Login
+### Login (Sign In)
 * **URL:** `https://metall-store-api.onrender.com/users/login/`
 * **Method:** `POST`
 * **Body:**
@@ -58,7 +58,7 @@ Base URL: `https://metall-store-api.onrender.com`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/users/biznes/<id>/`
 * **Update:** `PUT/PATCH` `https://metall-store-api.onrender.com/users/biznes/<id>/`
 
-### Tarif (CRUD)
+### Tarif
 * **List:** `GET` `https://metall-store-api.onrender.com/users/tarif/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/users/tarif/<id>/`
 
@@ -78,14 +78,18 @@ Base URL: `https://metall-store-api.onrender.com`
 
 ---
 
-## 2. Products Management (Prefix: `/products/`)
+## 2. Products & Inventory Management (Prefix: `/products/`)
 
-### Products (CRUD)
+### Products (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/<id>/`
 * **Update:** `PUT/PATCH` `https://metall-store-api.onrender.com/products/<id>/`
 * **Delete:** `DELETE` `https://metall-store-api.onrender.com/products/<id>/`
+* **Bulk Operations:** `POST` `https://metall-store-api.onrender.com/products/bulk_operations/`
+* **Stats:** `GET` `https://metall-store-api.onrender.com/products/stats/`
+* **Under Limit Products:** `GET` `https://metall-store-api.onrender.com/products/under_limit/`
+* **Toggle Archive:** `POST` `https://metall-store-api.onrender.com/products/<id>/toggle_archive/`
 
 ### Dokon / Stores (CRUD)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/dokon/`
@@ -94,20 +98,26 @@ Base URL: `https://metall-store-api.onrender.com`
 * **Update:** `PUT/PATCH` `https://metall-store-api.onrender.com/products/dokon/<id>/`
 * **Delete:** `DELETE` `https://metall-store-api.onrender.com/products/dokon/<id>/`
 
-### Import (CRUD)
+### Import (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/import/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/import/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/import/<id>/`
+* **Confirm Import:** `POST` `https://metall-store-api.onrender.com/products/import/<id>/confirm/`
+* **Get Import Template File:** `GET` `https://metall-store-api.onrender.com/products/import/template/`
 
-### Transfer (CRUD)
+### Transfer (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/transfer/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/transfer/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/transfer/<id>/`
+* **Confirm Transfer:** `POST` `https://metall-store-api.onrender.com/products/transfer/<id>/confirm/`
 
-### Write-off (CRUD)
+### Write-off (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/write-off/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/write-off/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/write-off/<id>/`
+* **Confirm Write-off:** `POST` `https://metall-store-api.onrender.com/products/write-off/<id>/confirm/`
+* **Cancel Write-off:** `POST` `https://metall-store-api.onrender.com/products/write-off/<id>/cancel/`
+* **Stats:** `GET` `https://metall-store-api.onrender.com/products/write-off/stats/`
 
 ### Characteristics (CRUD)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/characteristics/`
@@ -126,7 +136,7 @@ Base URL: `https://metall-store-api.onrender.com`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/barcodes/<id>/`
 * **Delete:** `DELETE` `https://metall-store-api.onrender.com/products/barcodes/<id>/`
 
-### Custom Fields (CRUD)
+### Custom Fields / XususiyatMaydoni (CRUD)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/fields/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/fields/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/fields/<id>/`
@@ -136,29 +146,48 @@ Base URL: `https://metall-store-api.onrender.com`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/toplam/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/toplam/<id>/`
 
-### Price Tag Templates (CRUD)
+### Price Tag Templates / YorliqShablon (CRUD)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/price-tag-templates/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/price-tag-templates/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/price-tag-templates/<id>/`
 
+### Suppliers / Taminotchi (CRUD & Actions)
+* **List:** `GET` `https://metall-store-api.onrender.com/products/suppliers/`
+* **Create:** `POST` `https://metall-store-api.onrender.com/products/suppliers/`
+* **Detail:** `GET` `https://metall-store-api.onrender.com/products/suppliers/<id>/`
+* **Update:** `PUT/PATCH` `https://metall-store-api.onrender.com/products/suppliers/<id>/`
+* **Delete:** `DELETE` `https://metall-store-api.onrender.com/products/suppliers/<id>/`
+* **Pay Supplier:** `POST` `https://metall-store-api.onrender.com/products/suppliers/<id>/pay/`
+* **Payment History:** `GET` `https://metall-store-api.onrender.com/products/suppliers/<id>/history/`
+* **Orders History:** `GET` `https://metall-store-api.onrender.com/products/suppliers/<id>/orders/`
+* **Stats:** `GET` `https://metall-store-api.onrender.com/products/suppliers/stats/`
+
 ---
 
-## 3. Supplier Orders (Prefix: `/products/order/`)
+## 3. Supplier Orders & Xaridlar (Prefix: `/products/order/`)
 
-### Supplier Orders (CRUD)
+### Supplier Orders (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/order/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/order/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/order/<id>/`
+* **Confirm Order:** `POST` `https://metall-store-api.onrender.com/products/order/<id>/confirm/`
+* **Cancel Order:** `POST` `https://metall-store-api.onrender.com/products/order/<id>/cancel/`
+* **Get Order Items:** `GET` `https://metall-store-api.onrender.com/products/order/<id>/items/`
+* **Pay for Order:** `POST` `https://metall-store-api.onrender.com/products/order/<id>/pay/`
 
-### Suppliers / Taminotchilar (CRUD)
+### Suppliers / Taminotchilar (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/order/taminotchilar/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/order/taminotchilar/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/order/taminotchilar/<id>/`
+* **Stats:** `GET` `https://metall-store-api.onrender.com/products/order/taminotchilar/stats/`
 
-### Returns (CRUD)
+### Returns (CRUD & Actions)
 * **List:** `GET` `https://metall-store-api.onrender.com/products/order/returns/`
 * **Create:** `POST` `https://metall-store-api.onrender.com/products/order/returns/`
 * **Detail:** `GET` `https://metall-store-api.onrender.com/products/order/returns/<id>/`
+* **Confirm Return:** `POST` `https://metall-store-api.onrender.com/products/order/returns/<id>/confirm/`
+* **Cancel Return:** `POST` `https://metall-store-api.onrender.com/products/order/returns/<id>/cancel/`
+* **Stats:** `GET` `https://metall-store-api.onrender.com/products/order/returns/stats/`
 
 ---
 
