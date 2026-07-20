@@ -230,6 +230,23 @@ class RegisterAPITestCase(APITestCase):
         self.assertIsNotNone(xodim.biznes)
         self.assertEqual(xodim.biznes.nomi, "Valining Biznesi")
 
+    def test_registration_without_password_autogenerate(self):
+        payload = {
+            "ism": "Ali",
+            "telefon_raqam": "+998909999999"
+        }
+        response = self.client.post(self.register_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['ism'], "Ali")
+
+        # Verify Xodim is created and has a hashed password
+        xodim = Xodim.objects.filter(telefon_raqam="+998909999999").first()
+        self.assertIsNotNone(xodim)
+        self.assertNotEqual(xodim.parol, "")
+        self.assertTrue(xodim.user.has_usable_password()) # Dummy hash check is not needed, user.password is hashed
+
+
     def test_registration_ignores_and_prevents_admin_role_escalation(self):
         # Security: Registrations cannot specify role, role must default to 'admin' (CEO)
         payload = {
@@ -541,5 +558,18 @@ class TarifAPITestCase(APITestCase):
         response = self.client.patch(detail_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("xodim", str(response.data['errors']['tarif']))
+
+
+class SwaggerAPITestCase(APITestCase):
+    def test_swagger_endpoints_load(self):
+        response = self.client.get(reverse('schema'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        response = self.client.get(reverse('swagger-ui'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        response = self.client.get(reverse('redoc'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
 
 

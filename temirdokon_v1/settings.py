@@ -53,7 +53,8 @@ INSTALLED_APPS = [
     'blog',
     'user',
     'products',
-    'orders'
+    'orders',
+    'drf_spectacular',
 ]
 
 MIDDLEWARE = [
@@ -198,6 +199,7 @@ if DEBUG:
     _renderers.append('rest_framework.renderers.BrowsableAPIRenderer')
 
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_RENDERER_CLASSES': _renderers,
     # MED-1: Faqat Token authentication (SessionAuth olib tashlandi — CSRF ziddiyat)
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -222,3 +224,20 @@ REST_FRAMEWORK = {
         'register': '3/hour',
     }
 }
+
+# ============================================================
+# Spectacular settings (Swagger & Open API 3)
+# ============================================================
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Temir Dokon API',
+    'DESCRIPTION': 'API documentation for Temir Dokon project',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
+
+# ============================================================
+# Telegram Bot Integration
+# ============================================================
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+

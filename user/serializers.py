@@ -163,8 +163,8 @@ class LogoutSerializer(serializers.Serializer):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    parol = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
-    parolni_tasdiqlash = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    parol = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
+    parolni_tasdiqlash = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
     biznes_nomi = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
@@ -188,10 +188,19 @@ class RegisterSerializer(serializers.ModelSerializer):
         parol = attrs.get('parol')
         parolni_tasdiqlash = attrs.get('parolni_tasdiqlash')
 
+        if not parol:
+            from user.telegram_bot import generate_random_password
+            parol = generate_random_password()
+            parolni_tasdiqlash = parol
+            attrs['parol'] = parol
+            attrs['parolni_tasdiqlash'] = parol
+
         if parol != parolni_tasdiqlash:
             raise serializers.ValidationError({'parolni_tasdiqlash': "Parollar bir-biriga mos kelmadi."})
 
+        self.context['raw_password'] = parol
         attrs.pop('parolni_tasdiqlash', None)
+
 
         # Build temp instance with default values to run model validations
         temp_attrs = attrs.copy()
