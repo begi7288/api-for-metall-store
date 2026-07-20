@@ -5,8 +5,10 @@ from user.serializers import XSSSanitizerMixin
 
 class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     boshliq = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    boshliq_ismi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
     manzil = serializers.CharField(source='yuridik_manzil', required=False, allow_null=True, allow_blank=True)
     telefon = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
+    tel_raqami = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
     oxirgi_qarz = serializers.SerializerMethodField()
     jami_qarz = serializers.SerializerMethodField()
     qarz_summasi = serializers.SerializerMethodField()
@@ -17,8 +19,8 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     class Meta:
         model = Taminotchi
         fields = [
-            'id', 'biznes', 'nomi', 'telefon', 'telefon_raqam', 'telefonlar', 'standart_ustama',
-            'eslatma', 'boshliq', 'yuridik_nomi', 'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
+            'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telefon_raqam', 'telefonlar', 'standart_ustama',
+            'eslatma', 'boshliq', 'boshliq_ismi', 'yuridik_nomi', 'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
             'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'balans',
             'oxirgi_qarz', 'jami_qarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni'
         ]
