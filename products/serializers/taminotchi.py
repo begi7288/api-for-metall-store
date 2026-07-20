@@ -6,11 +6,15 @@ from user.serializers import XSSSanitizerMixin
 class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     boshliq = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
     boshliq_ismi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
+    boshliqIsmi = serializers.CharField(source='yuridik_nomi', required=False, allow_null=True, allow_blank=True)
     manzil = serializers.CharField(source='yuridik_manzil', required=False, allow_null=True, allow_blank=True)
     telefon = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
     tel_raqami = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
+    telRaqami = serializers.CharField(source='telefon_raqam', required=False, allow_null=True, allow_blank=True)
     oxirgi_qarz = serializers.SerializerMethodField()
+    oxirgiQarz = serializers.SerializerMethodField()
     jami_qarz = serializers.SerializerMethodField()
+    jamiQarz = serializers.SerializerMethodField()
     qarz_summasi = serializers.SerializerMethodField()
     buyurtmalar_summasi = serializers.SerializerMethodField()
     tolovlar_summasi = serializers.SerializerMethodField()
@@ -19,10 +23,10 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     class Meta:
         model = Taminotchi
         fields = [
-            'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telefon_raqam', 'telefonlar', 'standart_ustama',
-            'eslatma', 'boshliq', 'boshliq_ismi', 'yuridik_nomi', 'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
+            'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telRaqami', 'telefon_raqam', 'telefonlar', 'standart_ustama',
+            'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'yuridik_nomi', 'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
             'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'balans',
-            'oxirgi_qarz', 'jami_qarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni'
+            'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni'
         ]
         read_only_fields = ['biznes']
 
@@ -32,8 +36,14 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             return last_order.nasiya_summa
         return Decimal('0.00')
 
+    def get_oxirgiQarz(self, obj):
+        return self.get_oxirgi_qarz(obj)
+
     def get_jami_qarz(self, obj):
         return self.get_qarz_summasi(obj)
+
+    def get_jamiQarz(self, obj):
+        return self.get_jami_qarz(obj)
 
     def get_qarz_summasi(self, obj):
         from django.db.models import Sum
