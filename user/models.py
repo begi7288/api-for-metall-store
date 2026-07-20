@@ -21,6 +21,10 @@ def validate_password_strength(password, field_name='parol'):
     try:
         identify_hasher(password)
     except ValueError:
+        # Allow 6-digit numeric code for SMS verification mockup
+        if password.isdigit() and len(password) == 6:
+            return
+            
         if len(password) < 8:
             raise ValidationError({field_name: "Parol kamida 8 ta belgidan iborat bo'lishi kerak."})
         if not any(char.isupper() for char in password):
@@ -31,6 +35,7 @@ def validate_password_strength(password, field_name='parol'):
             raise ValidationError({field_name: "Parolda kamida bitta raqam (0-9) bo'lishi kerak."})
         if not any(char in r"!@#$%^&*()_+-=[]{}|;':\",./<>?`~ʻ" for char in password):
             raise ValidationError({field_name: "Parolda kamida bitta maxsus belgi (!@#$%^&*...) bo'lishi kerak."})
+
 
 
 class Tarif(BaseModel):

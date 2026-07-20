@@ -7,28 +7,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def generate_random_password(length=12):
+def generate_random_password(length=6):
     """
-    Generates a secure random password that satisfies validate_password_strength.
-    Requires at least one uppercase, lowercase, digit, and special character.
+    Generates a 6-digit numeric verification code.
     """
-    uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    lowers = "abcdefghijklmnopqrstuvwxyz"
-    digits = "0123456789"
-    specials = "!@#$%^&*()_+-=[]{}|;':\",./<>?`~ʻ"
-    
-    password_chars = [
-        random.choice(uppers),
-        random.choice(lowers),
-        random.choice(digits),
-        random.choice(specials),
-    ]
-    
-    all_pool = uppers + lowers + digits + specials
-    password_chars += [random.choice(all_pool) for _ in range(length - 4)]
-    
-    random.shuffle(password_chars)
-    return "".join(password_chars)
+    return "".join(random.choice("0123456789") for _ in range(6))
+
 
 def send_telegram_message(text: str):
     """
