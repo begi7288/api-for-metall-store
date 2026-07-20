@@ -572,4 +572,53 @@ class SwaggerAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
+class ExtraEndpointsAPITestCase(APITestCase):
+    def setUp(self):
+        from user.models import Biznes, Xodim
+        from products.models import Mahsulot
+        self.biznes = Biznes.objects.create(nomi="Test Biznes", egasi_ism="Owner")
+        self.xodim = Xodim.objects.create(
+            biznes=self.biznes, ism="Ali", familiya="Vali", telefon_raqam="+998901234567",
+            parol="SecurePass123!", rol="admin", jinsi="erkak"
+        )
+        self.token = Token.objects.create(user=self.xodim.user).key
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token)
+        
+        # Create products (one active, one archived)
+        Mahsulot.objects.create(
+            biznes=self.biznes, nomi="Cement", olchov_birligi="kg",
+            kelish_narxi="40000.00", sotish_narxi="50000.00", toifa="Stroy", is_active=True
+        )
+        Mahsulot.objects.create(
+            biznes=self.biznes, nomi="Brick", olchov_birligi="dona",
+            kelish_narxi="1000.00", sotish_narxi="1500.00", toifa="Material", is_active=False
+        )
+
+    def test_roles_endpoint(self):
+        response = self.client.get(reverse('roles-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual(response.data[0]['id'], 'admin')
+
+    def test_units_endpoint(self):
+        response = self.client.get(reverse('units-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 4)
+        self.assertEqual(response.data[0]['id'], 'kg')
+
+    def test_categories_endpoint(self):
+        response = self.client.get(reverse('categories-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]['nomi'], 'Material')
+        self.assertEqual(response.data[1]['nomi'], 'Stroy')
+
+    def test_archive_endpoint(self):
+        response = self.client.get(reverse('archive-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['nomi'], 'Brick')
+
+
+
 
