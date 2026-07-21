@@ -73,31 +73,21 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         # Extract initial debt fields if they exist in the incoming request data
-        def clean_val(val):
-            if val is None:
-                return None
-            if isinstance(val, str):
-                val = val.replace(' ', '').replace(',', '').strip()
-                if not val or val.lower() in ('null', 'undefined'):
-                    return None
-            try:
-                num = float(val)
-                if num == 0.0:
-                    return None
-                return val
-            except (ValueError, TypeError):
-                return None
-
-        val_oxirgi = clean_val(data.get('oxirgi_qarz') or data.get('oxirgiQarz'))
-        val_jami = clean_val(data.get('jami_qarz') or data.get('jamiQarz'))
+        oxirgi_qarz = data.get('oxirgi_qarz') or data.get('oxirgiQarz')
+        jami_qarz = data.get('jami_qarz') or data.get('jamiQarz')
         
-        target_val = val_oxirgi or val_jami
+        target_val = oxirgi_qarz if oxirgi_qarz is not None else jami_qarz
         
         if target_val is not None and not data.get('dastlabki_qarz') and not data.get('dastlabkiQarz'):
             if hasattr(data, 'copy'):
                 data = data.copy()
             else:
                 data = dict(data)
+                
+            if isinstance(target_val, str):
+                target_val = target_val.replace(' ', '').replace(',', '').strip()
+                if not target_val:
+                    target_val = None
             data['dastlabki_qarz'] = target_val
             
         return super().to_internal_value(data)

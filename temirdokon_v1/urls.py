@@ -27,6 +27,7 @@ urlpatterns = [
     path('users/', include('user.urls')),
     path('products/order/', include('orders.urls')),
     path('products/', include('products.urls')),
+    path('sales/', include('sales.urls')),
     
     path('roles/', RolesViewSet.as_view({'get': 'list', 'post': 'create'}), name='roles-list'),
     path('roles/<str:pk>/', RolesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='roles-detail'),
