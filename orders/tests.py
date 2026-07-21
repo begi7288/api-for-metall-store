@@ -389,3 +389,36 @@ class SupplierOrdersAPITestCase(APITestCase):
         ids = [item['id'] for item in response.data]
         self.assertIn(o_id, ids)
 
+    def test_supplier_order_extra_features(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1)
+        
+        # Test stats / buyurtma_stats endpoint
+        stats_url = reverse('supplier-order-buyurtma-stats')
+        response = self.client.get(stats_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('barchasi', response.data)
+        self.assertIn('tolanmagan', response.data)
+        
+        # Test payment_status filter
+        list_url = reverse('supplier-order-list')
+        res_filter = self.client.get(list_url, {'payment_status': 'tolanmagan'})
+        self.assertEqual(res_filter.status_code, status.HTTP_200_OK)
+
+        # Test excel export
+        res_excel = self.client.get(list_url, {'export': 'excel'})
+        self.assertEqual(res_excel.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_excel["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_order_returns_extra_features(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1)
+        
+        # Test buyurtma-qaytarishlari list
+        list_url = reverse('buyurtma-qaytarishlari-list')
+        response = self.client.get(list_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Test buyurtma-qaytarishlari Excel export
+        res_excel = self.client.get(list_url, {'export': 'excel'})
+        self.assertEqual(res_excel.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_excel["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+

@@ -24,14 +24,45 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     parol = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
     parolni_tasdiqlash = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
 
+    fish = serializers.SerializerMethodField()
+    full_name = serializers.SerializerMethodField()
+    fullName = serializers.SerializerMethodField()
+    dokon = serializers.SerializerMethodField()
+    dokon_nomi = serializers.SerializerMethodField()
+    telefon = serializers.ReadOnlyField(source='telefon_raqam')
+    tel = serializers.ReadOnlyField(source='telefon_raqam')
+    holat = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
     class Meta:
         model = Xodim
         fields = [
-            'id', 'biznes', 'ism', 'familiya', 'telefon_raqam', 'parol', 'parolni_tasdiqlash',
-            'rol', 'jinsi', 'tugilgan_sana', 'is_active',
-            'yaratilgan_vaqt', 'yangilangan_vaqt'
+            'id', 'biznes', 'ism', 'familiya', 'telefon_raqam', 'telefon', 'tel', 'parol', 'parolni_tasdiqlash',
+            'rol', 'jinsi', 'tugilgan_sana', 'is_active', 'fish', 'full_name', 'fullName', 'dokon', 'dokon_nomi',
+            'holat', 'status', 'yaratilgan_vaqt', 'yangilangan_vaqt'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+
+    def get_fish(self, obj):
+        return f"{obj.ism} {obj.familiya or ''}".strip()
+
+    def get_full_name(self, obj):
+        return self.get_fish(obj)
+
+    def get_fullName(self, obj):
+        return self.get_fish(obj)
+
+    def get_dokon(self, obj):
+        return "Bosh do'kon"
+
+    def get_dokon_nomi(self, obj):
+        return "Bosh do'kon"
+
+    def get_holat(self, obj):
+        return "Faol" if obj.is_active else "O'chirilgan"
+
+    def get_status(self, obj):
+        return self.get_holat(obj)
 
     def validate(self, attrs):
         # 1. Prevent role escalation (non-admin/non-omborchi cannot change rol or is_active)
@@ -94,14 +125,44 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
 
 class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
+    familiya = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    telefon_raqam_2 = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    manzil = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    guruhlar = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    teglar = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+
+    xaridlar_summasi = serializers.SerializerMethodField(read_only=True)
+    oxirgi_xarid = serializers.SerializerMethodField(read_only=True)
+
+    # Aliases for table settings modal & column customization
+    tugilgan_kun = serializers.DateField(source='tugilgan_sana', read_only=True)
+    royshatdan_otgan_sana = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
+    created_at = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
+    phone = serializers.CharField(source='telefon_raqam_1', read_only=True)
+
     class Meta:
         model = Mijoz
         fields = [
-            'id', 'biznes', 'ism', 'familiya', 'otasining_ismi', 'tugilgan_sana',
-            'jinsi', 'telefon_raqam_1', 'telefon_raqam_2',
-            'yaratilgan_vaqt', 'yangilangan_vaqt'
+            'id', 'biznes', 'ism', 'familiya', 'otasining_ismi', 'tugilgan_sana', 'tugilgan_kun',
+            'jinsi', 'telefon_raqam_1', 'telefon_raqam_2', 'phone', 'manzil', 'guruhlar', 'teglar',
+            'xaridlar_summasi', 'oxirgi_xarid',
+            'yaratilgan_vaqt', 'yangilangan_vaqt', 'royshatdan_otgan_sana', 'created_at'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+
+    def get_xaridlar_summasi(self, obj):
+        if hasattr(obj, 'annotated_xaridlar_summasi') and obj.annotated_xaridlar_summasi is not None:
+            return str(obj.annotated_xaridlar_summasi)
+        from django.db.models import Sum
+        from decimal import Decimal
+        total = obj.sotuvlar.filter(holat='yakunlangan').aggregate(Sum('yakuniy_summa'))['yakuniy_summa__sum']
+        return str(total if total is not None else Decimal('0.00'))
+
+    def get_oxirgi_xarid(self, obj):
+        if hasattr(obj, 'annotated_oxirgi_xarid'):
+            return obj.annotated_oxirgi_xarid
+        last_sale = obj.sotuvlar.filter(holat='yakunlangan').order_by('-yaratilgan_vaqt').first()
+        return last_sale.yaratilgan_vaqt if last_sale else None
 
     def validate(self, attrs):
         instance = self.instance
@@ -114,7 +175,10 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         temp_attrs.update(attrs)
         temp_attrs.pop('id', None)
         
-        temp_instance = Mijoz(**temp_attrs)
+        model_field_names = [f.name for f in Mijoz._meta.get_fields()]
+        model_attrs = {k: v for k, v in temp_attrs.items() if k in model_field_names}
+
+        temp_instance = Mijoz(**model_attrs)
         try:
             temp_instance.clean()
         except ValidationError as e:

@@ -14,10 +14,10 @@ class MahsulotViewSet(viewsets.ModelViewSet):
     serializer_class = MahsulotSerializer
     permission_classes = [IsAdminOrOmborchiOrReadOnly]
     
-    filterset_fields = ['olchov_birligi', 'is_active', 'toifa', 'brend', 'taminotchi', 'erkin_narx']
+    filterset_fields = ['is_active', 'toifa', 'brend', 'taminotchi', 'erkin_narx']
     search_fields = ['nomi', 'shtrix_kodlar__kod']
-    ordering_fields = ['kelish_narxi', 'sotish_narxi', 'miqdori', 'yaratilgan_vaqt']
-
+    ordering_fields = ['nomi', 'kelish_narxi', 'sotish_narxi', 'miqdori', 'yaratilgan_vaqt']
+ 
     def get_queryset(self):
         user = self.request.user
         queryset = Mahsulot.objects.all().prefetch_related('qoldiqlar', 'shtrix_kodlar').order_by('-yaratilgan_vaqt')
@@ -28,6 +28,13 @@ class MahsulotViewSet(viewsets.ModelViewSet):
         else:
             queryset = queryset.none()
             
+        olchov_birligi_param = self.request.query_params.get('olchov_birligi')
+        if olchov_birligi_param:
+            if str(olchov_birligi_param).isdigit():
+                queryset = queryset.filter(olchov_birligi_id=olchov_birligi_param)
+            else:
+                queryset = queryset.filter(olchov_birligi__short_name__iexact=olchov_birligi_param)
+
         kam_qoldi = self.request.query_params.get('kam_qoldi')
         if kam_qoldi is not None:
             if kam_qoldi.lower() == 'true':
@@ -91,7 +98,53 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                     ordered_products = ordered_products.filter(order__taminotchi_id=taminotchi_id)
                 product_ids = ordered_products.values_list('mahsulot_id', flat=True)
                 queryset = queryset.filter(id__in=product_ids)
-                
+
+        taminotchi = self.request.query_params.get('taminotchi')
+        if taminotchi and not (oldin_buyurtma_qilingan and oldin_buyurtma_qilingan.lower() == 'true'):
+            queryset = queryset.filter(taminotchi_id=taminotchi)
+
+        holat_rangi = self.request.query_params.get('holat_rangi')
+        if holat_rangi:
+            try:
+                kritik = int(self.request.query_params.get('kritik_chegara', 10))
+                kam = int(self.request.query_params.get('kam_chegara', 20))
+            except ValueError:
+                kritik, kam = 10, 20
+            
+            if holat_rangi.lower() == 'kritik':
+                queryset = queryset.filter(miqdori__lte=kritik)
+            elif holat_rangi.lower() == 'kam':
+                queryset = queryset.filter(miqdori__gt=kritik, miqdori__lte=kam)
+            elif holat_rangi.lower() == 'normal':
+                queryset = queryset.filter(miqdori__gt=kam)
+
+        kategoriya = self.request.query_params.get('kategoriya')
+        if kategoriya:
+            if kategoriya.isdigit():
+                queryset = queryset.filter(toifa_id=kategoriya)
+            else:
+                queryset = queryset.filter(toifa__icontains=kategoriya)
+
+        holat = self.request.query_params.get('holat')
+        if holat:
+            val = holat.lower()
+            if val in ['faol', 'active', 'true']:
+                queryset = queryset.filter(is_active=True)
+            elif val in ['faol_emas', 'faol emas', 'inactive', 'false']:
+                queryset = queryset.filter(is_active=False)
+            elif val in ['kritik', 'kam', 'normal']:
+                try:
+                    kritik = int(self.request.query_params.get('kritik_chegara', 10))
+                    kam = int(self.request.query_params.get('kam_chegara', 20))
+                except ValueError:
+                    kritik, kam = 10, 20
+                if val == 'kritik':
+                    queryset = queryset.filter(miqdori__lte=kritik)
+                elif val == 'kam':
+                    queryset = queryset.filter(miqdori__gt=kritik, miqdori__lte=kam)
+                elif val == 'normal':
+                    queryset = queryset.filter(miqdori__gt=kam)
+
         return queryset
 
     def filter_queryset(self, queryset):
@@ -108,6 +161,88 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                     self.request._request.GET = q_params
             return qs
         return super().filter_queryset(queryset)
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get('export') in ['csv', 'excel']:
+            import csv
+            from django.http import HttpResponse
+            queryset = self.filter_queryset(self.get_queryset())
+            response = HttpResponse(content_type='text/csv; charset=utf-8')
+            response['Content-Disposition'] = 'attachment; filename="ombor_mahsulotlar.csv"'
+            response.write('\ufeff'.encode('utf8'))
+            writer = csv.writer(response)
+            writer.writerow(["ID", "Mahsulot", "Shtrix kod", "Kategoriya", "Ta'minotchi", "Miqdori", "Kelish narxi", "Sotish narxi", "Status"])
+            for item in queryset:
+                shtrix = item.shtrix_kodlar.first().kod if item.shtrix_kodlar.exists() else ""
+                kategoriya = item.toifa.nomi if item.toifa else ""
+                taminotchi = item.taminotchi.ism if item.taminotchi else ""
+                status_str = "Faol" if item.is_active else "Nofaol"
+                writer.writerow([
+                    item.id,
+                    item.nomi,
+                    shtrix,
+                    kategoriya,
+                    taminotchi,
+                    item.miqdori,
+                    str(item.kelish_narxi or 0),
+                    str(item.sotish_narxi or 0),
+                    status_str
+                ])
+            return response
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get'])
+    def ombor_stats(self, request):
+        user = request.user
+        base_qs = Mahsulot.objects.all()
+        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
+            base_qs = base_qs.filter(biznes=user.xodim.biznes)
+        elif not user.is_superuser:
+            base_qs = base_qs.none()
+            
+        barchasi = base_qs.count()
+        faol = base_qs.filter(is_active=True).count()
+        faol_bolmaganlar = base_qs.filter(is_active=False).count()
+        kam_qoldiq = base_qs.filter(qoldiqlar__miqdori__gt=0, qoldiqlar__miqdori__lte=F('qoldiqlar__ogohlantirish')).distinct().count()
+        nol_qoldiq = base_qs.filter(miqdori=0).count()
+
+        return Response({
+            'barchasi': barchasi,
+            'faol': faol,
+            'faol_bolmaganlar': faol_bolmaganlar,
+            'kam_qoldiq': kam_qoldiq,
+            'nol_qoldiq': nol_qoldiq,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def top_kam_qolganlar(self, request):
+        limit = int(request.query_params.get('limit', 5))
+        queryset = self.get_queryset().filter(is_active=True).order_by('miqdori')[:limit]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def bulk_action(self, request):
+        ids = request.data.get('ids', [])
+        action_type = request.data.get('action')
+        if not ids or not action_type:
+            return Response({"detail": "ids va action berilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        queryset = self.get_queryset().filter(id__in=ids)
+        count = queryset.count()
+
+        if action_type == 'delete':
+            queryset.delete()
+        elif action_type == 'archive':
+            queryset.update(is_active=False)
+        elif action_type == 'unarchive':
+            queryset.update(is_active=True)
+        elif action_type == 'change_category':
+            toifa = request.data.get('toifa')
+            if toifa:
+                queryset.update(toifa=toifa)
+
+        return Response({"detail": f"{count} ta mahsulot ustida '{action_type}' amali bajarildi."}, status=status.HTTP_200_OK)
 
     def perform_create(self, serializer):
         biznes = None
@@ -180,7 +315,7 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                     "nomi": p.nomi,
                     "shtrix_kod": shtrix_kod,
                     "sotish_narxi": str(p.sotish_narxi or '0.00'),
-                    "olchov_birligi": p.olchov_birligi,
+                    "olchov_birligi": p.olchov_birligi.short_name if p.olchov_birligi else "",
                     "soni": max(0, int(soni))
                 })
             return Response({"success": True, "labels": label_data}, status=status.HTTP_200_OK)
@@ -205,19 +340,13 @@ class MahsulotViewSet(viewsets.ModelViewSet):
             if not isinstance(characteristics_input, dict):
                 return Response({"detail": "Xususiyatlar to'g'ri formatda yuborilmadi (dict bo'lishi shart)."}, status=status.HTTP_400_BAD_REQUEST)
 
-            char_objs = []
-            for name, val in characteristics_input.items():
-                name_clean = name.strip()
-                val_clean = str(val).strip()
-                if name_clean and val_clean:
-                    char_obj, _ = Characteristic.objects.get_or_create(name=name_clean, value=val_clean)
-                    char_objs.append(char_obj)
-
             for product in queryset:
-                for name in characteristics_input.keys():
-                    product.characteristics.filter(name__iexact=name.strip()).delete()
-                if char_objs:
-                    product.characteristics.add(*char_objs)
+                for name, val in characteristics_input.items():
+                    name_clean = name.strip()
+                    val_clean = str(val).strip()
+                    if name_clean and val_clean:
+                        product.characteristics.filter(name__iexact=name_clean).delete()
+                        Characteristic.objects.create(mahsulot=product, name=name_clean, value=val_clean)
             return Response({"success": True, "message": "Mahsulot xususiyatlari ommaviy o'zgartirildi."}, status=status.HTTP_200_OK)
 
         elif action_type == 'edit_prices':
@@ -334,8 +463,8 @@ class MahsulotViewSet(viewsets.ModelViewSet):
             retail_value = queryset.aggregate(val=Sum(retail_expr))['val'] or Decimal('0.00')
 
         from django.db.models import Count
-        breakdown = queryset.values('olchov_birligi').annotate(count=Count('id'))
-        unit_breakdown = {item['olchov_birligi']: item['count'] for item in breakdown}
+        breakdown = queryset.values('olchov_birligi__short_name').annotate(count=Count('id'))
+        unit_breakdown = {item['olchov_birligi__short_name'] or 'dona': item['count'] for item in breakdown}
 
         return Response({
             "total": total_count,
@@ -455,6 +584,19 @@ class XususiyatMaydoniViewSet(viewsets.ModelViewSet):
         if self.request.user and hasattr(self.request.user, 'xodim'):
             biznes = self.request.user.xodim.biznes
         serializer.save(biznes=biznes)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "Xususiyat maydoni muvaffaqiyatli o'chirildi."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        instance = self.get_object()
+        instance.is_active = True
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "Xususiyat maydoni muvaffaqiyatli qayta tiklandi."}, status=status.HTTP_200_OK)
 
 
 class ToplamViewSet(viewsets.ModelViewSet):

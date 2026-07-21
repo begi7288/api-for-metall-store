@@ -34,10 +34,11 @@ from django.db import models
 class SupplierOrderFilter(django_filters.FilterSet):
     to_lov_status = django_filters.CharFilter(method='filter_tolov_status')
     tolov_status = django_filters.CharFilter(method='filter_tolov_status')
+    payment_status = django_filters.CharFilter(method='filter_tolov_status')
 
     class Meta:
         model = SupplierOrder
-        fields = ['holat', 'taminotchi', 'dokon', 'to_lov_status', 'tolov_status']
+        fields = ['holat', 'taminotchi', 'dokon', 'to_lov_status', 'tolov_status', 'payment_status']
 
     def filter_tolov_status(self, queryset, name, value):
         if value == 'tolanmagan':
@@ -55,6 +56,46 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
     filterset_class = SupplierOrderFilter
     search_fields = ['id', 'nomi', 'taminotchi__nomi']
     ordering_fields = ['umumiy_summa', 'nasiya_summa', 'yaratilgan_vaqt']
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get('export') == 'excel':
+            queryset = self.filter_queryset(self.get_queryset())
+            headers = ["ID", "Nomi", "Yetkazib beruvchi", "Do'kon", "Sana", "Holat", "Jami summa", "To'langan summa", "Nasiya summasi"]
+            rows = []
+            for item in queryset:
+                rows.append([
+                    item.id,
+                    item.nomi,
+                    item.taminotchi.nomi if item.taminotchi else "",
+                    item.dokon.nomi if item.dokon else "",
+                    item.yaratilgan_vaqt.strftime("%d.%m.%Y %H:%M") if item.yaratilgan_vaqt else "",
+                    item.get_holat_display() if hasattr(item, 'get_holat_display') else item.holat,
+                    str(item.umumiy_summa),
+                    str(item.tolangan_summa),
+                    str(item.nasiya_summa)
+                ])
+            from products.views.common import generate_excel_response
+            return generate_excel_response("buyurtmalar", headers, rows)
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get'])
+    def order_stats(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        barchasi = queryset.count()
+        tolanmagan = queryset.filter(tolangan_summa=0).count()
+        qisman_tolangan = queryset.filter(tolangan_summa__gt=0, tolangan_summa__lt=models.F('umumiy_summa')).count()
+        tolangan = queryset.filter(tolangan_summa=models.F('umumiy_summa'), umumiy_summa__gt=0).count()
+
+        return Response({
+            "barchasi": barchasi,
+            "tolanmagan": tolanmagan,
+            "qisman_tolangan": qisman_tolangan,
+            "tolangan": tolangan
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def buyurtma_stats(self, request):
+        return self.order_stats(request)
 
     # HIGH-5: AllowAny olib tashlandi — template ham autentifikatsiya talab qiladi
 
@@ -244,6 +285,25 @@ class SupplierOrderReturnViewSet(viewsets.ModelViewSet):
     filterset_fields = ['holat', 'taminotchi', 'dokon']
     search_fields = ['order__nomi', 'taminotchi__nomi']
     ordering_fields = ['qaytarish_summasi', 'yaratilgan_vaqt']
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get('export') == 'excel':
+            queryset = self.filter_queryset(self.get_queryset())
+            headers = ["ID", "Nomi", "Yetkazib beruvchi", "Do'kon", "Sana", "Holat", "Qaytarish summasi"]
+            rows = []
+            for item in queryset:
+                rows.append([
+                    item.id,
+                    item.order.nomi if item.order else "Qaytarish",
+                    item.taminotchi.nomi if item.taminotchi else "",
+                    item.dokon.nomi if item.dokon else "",
+                    item.yaratilgan_vaqt.strftime("%d.%m.%Y %H:%M") if item.yaratilgan_vaqt else "",
+                    item.get_holat_display() if hasattr(item, 'get_holat_display') else item.holat,
+                    str(item.qaytarish_summasi)
+                ])
+            from products.views.common import generate_excel_response
+            return generate_excel_response("qaytarishlar", headers, rows)
+        return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
         user = self.request.user

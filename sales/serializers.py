@@ -203,3 +203,39 @@ class SaleSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         instance.oraliq_jami = instance.elementlar.aggregate(total=models.Sum('jami_summa'))['total'] or Decimal('0.00')
         instance.save()
         return instance
+
+
+class XarajatKategoriyasiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
+    name = serializers.CharField(source='nomi', required=False)
+
+    class Meta:
+        from .models import XarajatKategoriyasi
+        model = XarajatKategoriyasi
+        fields = ['id', 'biznes', 'nomi', 'name', 'tavsif', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+        read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+
+
+class XarajatSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
+    kategoriya_nomi = serializers.CharField(source='kategoriya.nomi', read_only=True)
+    category_name = serializers.CharField(source='kategoriya.nomi', read_only=True)
+    taminotchi_nomi = serializers.CharField(source='taminotchi.nomi', read_only=True)
+    amount = serializers.DecimalField(source='miqdor', max_digits=15, decimal_places=2, required=False)
+    date = serializers.DateField(source='sana', required=False)
+    payment_type = serializers.CharField(source='tolov_turi', required=False)
+    note = serializers.CharField(source='izoh', required=False, allow_blank=True)
+
+    class Meta:
+        from .models import Xarajat
+        model = Xarajat
+        fields = [
+            'id', 'biznes', 'kategoriya', 'kategoriya_nomi', 'category_name',
+            'taminotchi', 'taminotchi_nomi', 'miqdor', 'amount', 'tolov_turi', 'payment_type',
+            'sana', 'date', 'izoh', 'note', 'xodim', 'yaratilgan_vaqt', 'yangilangan_vaqt'
+        ]
+        read_only_fields = ['biznes', 'xodim', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+
+    def validate(self, attrs):
+        if 'sana' not in attrs or attrs['sana'] is None:
+            from django.utils import timezone
+            attrs['sana'] = timezone.now().date()
+        return attrs

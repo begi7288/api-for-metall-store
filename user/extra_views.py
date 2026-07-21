@@ -35,10 +35,12 @@ class OlchovBirligiSerializer(serializers.ModelSerializer):
     name = serializers.CharField(required=False)
     short_name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     shortName = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    qisqa_nom = serializers.CharField(source='short_name', required=False, allow_null=True, allow_blank=True)
+    qisqaNom = serializers.CharField(source='short_name', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = OlchovBirligi
-        fields = ['id', 'biznes', 'nomi', 'name', 'short_name', 'shortName']
+        fields = ['id', 'biznes', 'nomi', 'name', 'short_name', 'shortName', 'qisqa_nom', 'qisqaNom']
         read_only_fields = ['biznes']
 
     def validate(self, attrs):
@@ -51,12 +53,30 @@ class OlchovBirligiSerializer(serializers.ModelSerializer):
         attrs['nomi'] = nomi
         attrs.pop('name', None)
 
-        short_name = attrs.get('short_name') or attrs.get('shortName')
+        short_name = attrs.get('short_name') or attrs.get('shortName') or self.initial_data.get('qisqa_nom') or self.initial_data.get('qisqaNom')
         if short_name is None and self.instance and hasattr(self.instance, 'short_name'):
             short_name = self.instance.short_name
         attrs['short_name'] = short_name
         attrs.pop('shortName', None)
         return attrs
+
+DEFAULT_PAGE_KEYS = [
+    "dashboard", "sotuv_pos", "sotuvlar", "cheklar", "ombor", "kirimlar",
+    "sozlamalar", "sales_panel", "taminotchilar", "kategoriyalar", "xodimlar",
+    "lavozimlar", "olchov_birliklari", "mijozlar"
+]
+
+def get_default_huquqlar(role_id='admin'):
+    is_admin = (role_id == 'admin')
+    return {
+        key: {
+            "view": True,
+            "create": is_admin,
+            "edit": is_admin,
+            "delete": is_admin
+        }
+        for key in DEFAULT_PAGE_KEYS
+    }
 
 class XodimRoliSerializer(serializers.ModelSerializer):
     nomi = serializers.CharField(required=False)
@@ -71,6 +91,13 @@ class XodimRoliSerializer(serializers.ModelSerializer):
         fields = ['id', 'biznes', 'nomi', 'name', 'role_id', 'roleId', 'huquqlar', 'permissions']
         read_only_fields = ['biznes']
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if not ret.get('huquqlar'):
+            ret['huquqlar'] = get_default_huquqlar(instance.role_id)
+            ret['permissions'] = ret['huquqlar']
+        return ret
+
     def validate(self, attrs):
         nomi = attrs.get('nomi') or attrs.get('name')
         if not nomi:
@@ -84,8 +111,14 @@ class XodimRoliSerializer(serializers.ModelSerializer):
         role_id = attrs.get('role_id') or attrs.get('roleId')
         if role_id is None and self.instance and hasattr(self.instance, 'role_id'):
             role_id = self.instance.role_id
+        if not role_id:
+            role_id = nomi.lower().replace(' ', '_')
         attrs['role_id'] = role_id
         attrs.pop('roleId', None)
+
+        huquqlar = attrs.get('huquqlar')
+        if not huquqlar:
+            attrs['huquqlar'] = get_default_huquqlar(role_id)
         return attrs
 
 
@@ -131,19 +164,17 @@ class UnitsViewSet(viewsets.ModelViewSet):
             return OlchovBirligi.objects.none()
         
         biznes = user.xodim.biznes
-        queryset = OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
+        defaults = [
+            ("Kilogramm", "kg"),
+            ("Dona", "dona"),
+            ("Metr", "metr"),
+            ("Litr", "litr")
+        ]
+        for nomi, short_name in defaults:
+            if not OlchovBirligi.objects.filter(biznes=biznes, short_name=short_name).exists():
+                OlchovBirligi.objects.create(biznes=biznes, nomi=nomi, short_name=short_name)
         
-        if not queryset.exists():
-            defaults = [
-                ("Kilogramm", "kg"),
-                ("Dona", "dona"),
-                ("Metr", "metr"),
-                ("Litr", "litr")
-            ]
-            units = [OlchovBirligi(biznes=biznes, nomi=d[0], short_name=d[1]) for d in defaults]
-            OlchovBirligi.objects.bulk_create(units)
-            queryset = OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
-            
+        queryset = OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
         return queryset
 
     def perform_create(self, serializer):
@@ -221,13 +252,38 @@ class ArchiveListAPIView(APIView):
     
     def get(self, request, *args, **kwargs):
         user = request.user
-        queryset = Mahsulot.objects.filter(is_active=False).prefetch_related('qoldiqlar', 'shtrix_kodlar').order_by('-yangilangan_vaqt')
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
+        
+        archive_items = []
+        
+        # Inactive Products
+        products = Mahsulot.objects.filter(is_active=False).prefetch_related('qoldiqlar', 'shtrix_kodlar').order_by('-yangilangan_vaqt')
         if user.is_superuser:
             pass
-        elif hasattr(user, 'xodim') and user.xodim.biznes:
-            queryset = queryset.filter(biznes=user.xodim.biznes)
+        elif biznes:
+            products = products.filter(biznes=biznes)
         else:
-            queryset = queryset.none()
-            
-        serializer = MahsulotSerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            products = products.none()
+
+        search = request.query_params.get('search')
+        if search:
+            from django.db import models
+            products = products.filter(
+                models.Q(nomi__icontains=search) |
+                models.Q(shtrix_kodlar__kod__icontains=search)
+            ).distinct()
+
+        for p in products:
+            archive_items.append({
+                "id": p.id,
+                "tur": "Mahsulot",
+                "type": "Mahsulot",
+                "nomi": p.nomi,
+                "name": p.nomi,
+                "sana": p.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if p.yangilangan_vaqt else "",
+                "date": p.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if p.yangilangan_vaqt else "",
+                "holat": "O'chirilgan",
+                "status": "O'chirilgan"
+            })
+
+        return Response(archive_items, status=status.HTTP_200_OK)

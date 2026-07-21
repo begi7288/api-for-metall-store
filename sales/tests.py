@@ -204,3 +204,136 @@ class SalesAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         self.assertTrue(response['Content-Disposition'].startswith('attachment; filename='))
+
+    def test_get_sale_chek_details(self):
+        self.client.force_authenticate(user=self.sotuvchi_user.user)
+        payload = {
+            "dokon": self.dokon.id,
+            "mijoz": self.mijoz.id,
+            "kod": "SOTUV-CHEK-123",
+            "holat": "yakunlangan",
+            "eslatma": "Mijozga chegirma qilindi",
+            "elementlar": [
+                {
+                    "mahsulot": self.product1.id,
+                    "miqdori": 1
+                }
+            ]
+        }
+        create_res = self.client.post(self.sales_list_url, payload, format='json')
+        self.assertEqual(create_res.status_code, status.HTTP_201_CREATED)
+
+        sale_id = create_res.data['id']
+        chek_url = reverse('sotuvlar-chek', kwargs={'pk': sale_id})
+        
+        response = self.client.get(chek_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['kod'], "SOTUV-CHEK-123")
+        self.assertEqual(response.data['eslatma'], "Mijozga chegirma qilindi")
+        self.assertEqual(len(response.data['elementlar']), 1)
+        self.assertEqual(response.data['dokon']['nomi'], "Test Shop")
+
+    def test_sales_stats_and_date_range_filters(self):
+        self.client.force_authenticate(user=self.sotuvchi_user.user)
+        payload = {
+            "dokon": self.dokon.id,
+            "kod": "SOTUV-STATS-1",
+            "holat": "yakunlangan",
+            "tolangan_summa": "60000.00",
+            "elementlar": [
+                {
+                    "mahsulot": self.product1.id,
+                    "miqdori": 1
+                }
+            ]
+        }
+        self.client.post(self.sales_list_url, payload, format='json')
+
+        stats_url = reverse('sotuvlar-stats')
+        response = self.client.get(stats_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Decimal(response.data['jami_kirim']), Decimal('60000.00'))
+        self.assertIn('jami_chiqim', response.data)
+
+    def test_cheklar_stats_summary(self):
+        self.client.force_authenticate(user=self.sotuvchi_user.user)
+        payload = {
+            "dokon": self.dokon.id,
+            "kod": "CHEK-STATS-1",
+            "holat": "yakunlangan",
+            "tolangan_summa": "120000.00",
+            "elementlar": [
+                {
+                    "mahsulot": self.product1.id,
+                    "miqdori": 2
+                }
+            ]
+        }
+        self.client.post(self.sales_list_url, payload, format='json')
+
+        cheklar_stats_url = reverse('sotuvlar-cheklar-stats')
+        response = self.client.get(cheklar_stats_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(response.data['cheklar'], 1)
+        self.assertGreaterEqual(response.data['soni'], 2)
+        self.assertGreaterEqual(Decimal(response.data['jami']), Decimal('120000.00'))
+
+    def test_sales_dashboard_and_analytics(self):
+        self.client.force_authenticate(user=self.sotuvchi_user.user)
+        dashboard_url = reverse('sales-dashboard')
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('bugungi_savdo', response.data)
+        self.assertIn('bugungi_xarajat', response.data)
+        self.assertIn('sof_pul', response.data)
+        self.assertIn('nasiyaga_sotilgan', response.data)
+        self.assertIn('tolov_turlari', response.data)
+        self.assertIn('top_5_mahsulot', response.data)
+        self.assertIn('oxirgi_harakatlar', response.data)
+
+        top_products_url = reverse('sales-top-products')
+        response_top = self.client.get(top_products_url)
+        self.assertEqual(response_top.status_code, status.HTTP_200_OK)
+
+        recent_act_url = reverse('sales-recent-activities')
+        response_act = self.client.get(recent_act_url)
+        self.assertEqual(response_act.status_code, status.HTTP_200_OK)
+
+    def test_expenses_and_panel_subtabs(self):
+        self.client.force_authenticate(user=self.sotuvchi_user.user)
+
+        cats_url = reverse('expense-categories')
+        res_cats = self.client.get(cats_url)
+        self.assertEqual(res_cats.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res_cats.data), 5)
+        cat_id = res_cats.data[0]['id']
+
+        exp_url = reverse('expenses-list')
+        exp_payload = {
+            "kategoriya": cat_id,
+            "miqdor": "150000.00",
+            "tolov_turi": "naqd",
+            "izoh": "Taksi xarajati"
+        }
+        res_exp = self.client.post(exp_url, exp_payload, format='json')
+        self.assertEqual(res_exp.status_code, status.HTTP_201_CREATED)
+
+        res_exp_list = self.client.get(exp_url)
+        self.assertEqual(res_exp_list.status_code, status.HTTP_200_OK)
+
+        res_cf = self.client.get(reverse('sales-cashflow'))
+        self.assertEqual(res_cf.status_code, status.HTTP_200_OK)
+
+        res_m = self.client.get(reverse('sales-monthly'))
+        self.assertEqual(res_m.status_code, status.HTTP_200_OK)
+
+        res_pa = self.client.get(reverse('sales-products-analytics'))
+        self.assertEqual(res_pa.status_code, status.HTTP_200_OK)
+
+        res_da = self.client.get(reverse('sales-debts-analytics'))
+        self.assertEqual(res_da.status_code, status.HTTP_200_OK)
+
+        res_abc = self.client.get(reverse('sales-abc-xyz'))
+        self.assertEqual(res_abc.status_code, status.HTTP_200_OK)
+        self.assertIn('summary', res_abc.data)
+        self.assertIn('matrix', res_abc.data)

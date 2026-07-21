@@ -45,6 +45,8 @@ class TransferViewSet(viewsets.ModelViewSet):
             
         try:
             transfer_obj = serializer.save(biznes=biznes, yaratgan_xodim=executor_xodim)
+            from user.telegram_bot import notify_transfer
+            notify_transfer(transfer_obj)
         except DjangoValidationError as e:
             if hasattr(e, 'message_dict'):
                 raise DRFValidationError(e.message_dict)

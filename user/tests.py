@@ -385,6 +385,47 @@ class MultiTenantSecurityTestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 0)
 
+    def test_customer_stats_and_filters(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin1_token)
+        
+        # 1. Create a customer with optional fields and tags/groups
+        payload = {
+            "ism": "Ali",
+            "telefon_raqam_1": "+998901112233",
+            "jinsi": "erkak",
+            "manzil": "Toshkent, Chilonzor",
+            "guruhlar": "VIP, Doimiy",
+            "teglar": "Ishonchli"
+        }
+        response = self.client.post(reverse('mijoz-list'), payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['ism'], "Ali")
+        self.assertEqual(response.data['guruhlar'], "VIP, Doimiy")
+        self.assertEqual(response.data['teglar'], "Ishonchli")
+        self.assertEqual(response.data['xaridlar_summasi'], "0.00")
+
+        # 2. Query customer stats endpoint
+        stats_url = reverse('mijoz-stats')
+        response = self.client.get(stats_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('jami_mijozlar', response.data)
+        self.assertIn('otgan_hafta', response.data)
+        self.assertIn('qaytib_kelmaydiganlar', response.data)
+        self.assertIn('tugilgan_kunlar', response.data)
+        self.assertEqual(response.data['jami_mijozlar'], 2)  # m1 + Ali
+
+        # 3. Query with guruh filter
+        response = self.client.get(reverse('mijoz-list'), {'guruh': 'VIP'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['ism'], "Ali")
+
+        # 4. Query with teg filter
+        response = self.client.get(reverse('mijoz-list'), {'teg': 'Ishonchli'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['ism'], "Ali")
+
 
 class BiznesAPITestCase(APITestCase):
     def setUp(self):
@@ -677,6 +718,121 @@ class ExtraEndpointsAPITestCase(APITestCase):
         response = self.client.post(reverse('categories-list'), payload_cat, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['nomi'], 'Lola')
+
+    def test_olchov_birliklari_and_rollar_router_urls(self):
+        response = self.client.get(reverse('olchov-birliklari-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get(reverse('rollar-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_archive_list_search_filter(self):
+        response = self.client.get(reverse('archive-list'), {'search': 'Brick'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+        response_empty = self.client.get(reverse('archive-list'), {'search': 'NonExistentProduct'})
+        self.assertEqual(response_empty.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response_empty.data), 0)
+
+        prod_archive_url = reverse('product-archive')
+        response_alias = self.client.get(prod_archive_url)
+        self.assertEqual(response_alias.status_code, status.HTTP_200_OK)
+
+    def test_credits_debtors_and_stats(self):
+        # GET /credits/debtors/
+        response = self.client.get(reverse('credits-debtors-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('qarzlar_summasi', response.data)
+        self.assertIn('qarzdorlar_soni', response.data)
+
+        # GET /credits/debtors/stats/
+        response_stats = self.client.get(reverse('credits-debtors-stats'))
+        self.assertEqual(response_stats.status_code, status.HTTP_200_OK)
+        self.assertIn('qarzlar_summasi', response_stats.data)
+
+        # POST /credits/debtors/send-sms/
+        response_sms = self.client.post(reverse('credits-debtors-send-sms'))
+        self.assertEqual(response_sms.status_code, status.HTTP_200_OK)
+
+    def test_loyalty_tiers_and_program(self):
+        # GET /loyalty/
+        response = self.client.get(reverse('loyalty-root'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('turi', response.data)
+        self.assertIn('darajalar', response.data)
+
+        # POST /loyalty/tiers/
+        tier_payload = {"name": "VIP Tier", "minPurchaseAmount": "5000000.00", "discount": "10.00"}
+        response_tier = self.client.post(reverse('loyalty-tiers-list'), tier_payload, format='json')
+        self.assertEqual(response_tier.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response_tier.data['nomi'], "VIP Tier")
+
+    def test_settings_endpoints(self):
+        # 1. Profile settings
+        profile_url = reverse('user-profile')
+        res_prof = self.client.get(profile_url)
+        self.assertEqual(res_prof.status_code, status.HTTP_200_OK)
+        self.assertIn('vaqt_mintaqasi', res_prof.data)
+
+        res_prof_patch = self.client.patch(profile_url, {"vaqt_mintaqasi": "Toshkent (GMT +5)", "til": "O'zbekcha"}, format='json')
+        self.assertEqual(res_prof_patch.status_code, status.HTTP_200_OK)
+
+        # 2. Company settings
+        comp_url = reverse('user-company')
+        res_comp = self.client.get(comp_url)
+        self.assertEqual(res_comp.status_code, status.HTTP_200_OK)
+
+        res_comp_patch = self.client.patch(comp_url, {"soha": "Chakana savdo", "inn": "123456789"}, format='json')
+        self.assertEqual(res_comp_patch.status_code, status.HTTP_200_OK)
+
+        # 3. Tarif settings
+        tarif_url = reverse('user-tarifs')
+        res_tarif = self.client.get(tarif_url)
+        self.assertEqual(res_tarif.status_code, status.HTTP_200_OK)
+
+        # 4. Receipt settings
+        receipt_url = reverse('receipt-settings')
+        res_rec = self.client.get(receipt_url)
+        self.assertEqual(res_rec.status_code, status.HTTP_200_OK)
+
+        res_rec_patch = self.client.patch(receipt_url, {"logotip": True, "mijoz_qarzi": True, "dokon_nomi_text": "Demo Store"}, format='json')
+        self.assertEqual(res_rec_patch.status_code, status.HTTP_200_OK)
+
+        # 5. Currencies settings
+        curr_url = reverse('user-currencies')
+        res_curr = self.client.get(curr_url)
+        self.assertEqual(res_curr.status_code, status.HTTP_200_OK)
+        res_curr_set = self.client.post(curr_url, {"code": "USD"}, format='json')
+        self.assertEqual(res_curr_set.status_code, status.HTTP_200_OK)
+
+        # 6. Payment types settings
+        pay_url = reverse('user-payment-types')
+        res_pay = self.client.get(pay_url)
+        self.assertEqual(res_pay.status_code, status.HTTP_200_OK)
+        res_pay_add = self.client.post(pay_url, {"name": "Humo"}, format='json')
+        self.assertEqual(res_pay_add.status_code, status.HTTP_200_OK)
+
+        # 7. Product settings
+        prod_url = reverse('user-product-settings')
+        res_prod = self.client.get(prod_url)
+        self.assertEqual(res_prod.status_code, status.HTTP_200_OK)
+        res_prod_patch = self.client.patch(prod_url, {"auto_generate_barcode": True, "min_stock_alert": 15}, format='json')
+        self.assertEqual(res_prod_patch.status_code, status.HTTP_200_OK)
+
+        # 8. Notification settings
+        notif_url = reverse('user-notification-settings')
+        res_notif = self.client.get(notif_url)
+        self.assertEqual(res_notif.status_code, status.HTTP_200_OK)
+        res_notif_patch = self.client.patch(notif_url, {"matrix": {"qoldiq_tugashi": {"email": True, "sms": True, "push": True}}}, format='json')
+        self.assertEqual(res_notif_patch.status_code, status.HTTP_200_OK)
+
+        # 9. Integrations settings
+        integ_url = reverse('user-integrations')
+        res_integ = self.client.get(integ_url)
+        self.assertEqual(res_integ.status_code, status.HTTP_200_OK)
+        res_integ_toggle = self.client.post(integ_url, {"code": "instagram"}, format='json')
+        self.assertEqual(res_integ_toggle.status_code, status.HTTP_200_OK)
 
 
 

@@ -15,13 +15,16 @@ class MahsulotShtrixKodInline(admin.TabularInline):
     model = MahsulotShtrixKod
     extra = 1
 
+class CharacteristicInline(admin.TabularInline):
+    model = Characteristic
+    extra = 1
+
 @admin.register(Mahsulot)
 class MahsulotAdmin(admin.ModelAdmin):
     list_display = ('nomi', 'shtrix_kod', 'olchov_birligi', 'kelish_narxi', 'sotish_narxi', 'miqdori', 'kam_qoldi')
     search_fields = ('nomi', 'shtrix_kodlar__kod')
     list_filter = ('olchov_birligi',)
-    filter_horizontal = ('characteristics',)
-    inlines = [MahsulotRasmInline, MahsulotShtrixKodInline]
+    inlines = [MahsulotRasmInline, MahsulotShtrixKodInline, CharacteristicInline]
 
 @admin.register(Import)
 class ImportAdmin(admin.ModelAdmin):

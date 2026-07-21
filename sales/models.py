@@ -119,3 +119,33 @@ class SaleItem(BaseModel):
 
     def __str__(self):
         return f"{self.mahsulot.nomi} x{self.miqdori}"
+
+
+class XarajatKategoriyasi(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='xarajat_kategoriyalari', null=True, blank=True)
+    nomi = models.CharField(max_length=100)
+    tavsif = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return self.nomi
+
+
+class Xarajat(BaseModel):
+    TOLOV_TURI_CHOICES = (
+        ('naqd', 'Naqd'),
+        ('karta', 'Karta'),
+        ('nasiya', 'Nasiya'),
+        ('aralash', 'Aralash'),
+    )
+
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='xarajatlar', null=True, blank=True)
+    kategoriya = models.ForeignKey(XarajatKategoriyasi, on_delete=models.SET_NULL, null=True, blank=True, related_name='xarajatlar')
+    taminotchi = models.ForeignKey('products.Taminotchi', on_delete=models.SET_NULL, null=True, blank=True, related_name='xarajatlar')
+    miqdor = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'))
+    tolov_turi = models.CharField(max_length=20, choices=TOLOV_TURI_CHOICES, default='naqd')
+    sana = models.DateField(null=True, blank=True)
+    izoh = models.TextField(blank=True, null=True)
+    xodim = models.ForeignKey(Xodim, on_delete=models.SET_NULL, null=True, blank=True, related_name='xarajatlar')
+
+    def __str__(self):
+        return f"{self.kategoriya.nomi if self.kategoriya else 'Xarajat'}: {self.miqdor} so'm"

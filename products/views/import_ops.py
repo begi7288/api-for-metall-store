@@ -15,10 +15,12 @@ from .common import DynamicPagination, generate_excel_response
 
 class ImportFilter(django_filters.FilterSet):
     sana = django_filters.DateFilter(field_name="yaratilgan_vaqt", lookup_expr='date')
+    dan = django_filters.DateFilter(field_name="yaratilgan_vaqt", lookup_expr='date__gte')
+    gacha = django_filters.DateFilter(field_name="yaratilgan_vaqt", lookup_expr='date__lte')
 
     class Meta:
         model = Import
-        fields = ['holat', 'import_turi', 'dokon', 'sana']
+        fields = ['holat', 'import_turi', 'dokon', 'sana', 'dan', 'gacha', 'taminotchi', 'tolov_turi']
 
 
 class ImportViewSet(viewsets.ModelViewSet):
@@ -93,6 +95,21 @@ class ImportViewSet(viewsets.ModelViewSet):
         return Response({
             'status': "Import muvaffaqiyatli yakunlandi.",
             'holat': import_obj.holat
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        from django.db.models import Sum
+        from decimal import Decimal
+        cheklar = queryset.count()
+        soni = queryset.aggregate(total=Sum('miqdori'))['total'] or 0
+        jami = queryset.aggregate(total=Sum('kelish_summasi'))['total'] or Decimal('0.00')
+
+        return Response({
+            'cheklar': cheklar,
+            'soni': soni,
+            'jami': str(jami)
         }, status=status.HTTP_200_OK)
 
     # HIGH-5: AllowAny olib tashlandi — template ham autentifikatsiya talab qiladi

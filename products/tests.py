@@ -613,6 +613,167 @@ class ImportAPITestCase(APITestCase):
         # Cashier should get 403 Forbidden
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_import_manual_flow(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin_token)
+        payload = {
+            "nomi": "Manual import test",
+            "import_turi": "kirim",
+            "dokon": self.dokon.id,
+            "elementlar": [
+                {
+                    "nomi": "Manual Cement",
+                    "shtrix_kod": "888877776666",
+                    "miqdori": 50,
+                    "kelish_narxi": 20000.0,
+                    "sotish_narxi": 30000.0,
+                    "olchov_birligi": "kg",
+                    "toifa": "Stroy",
+                    "characteristics": [
+                        {"name": "Qalinligi", "value": "2mm"}
+                    ]
+                }
+            ]
+        }
+        response = self.client.post(self.import_list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['holat'], 'yakunlangan')
+        self.assertEqual(response.data['miqdori'], 50)
+        self.assertEqual(float(response.data['kelish_summasi']), 1000000.0)
+
+        # Verify product was created and stock added
+        product = Mahsulot.objects.get(shtrix_kodlar__kod="888877776666")
+        self.assertEqual(product.nomi, "Manual Cement")
+        self.assertEqual(product.miqdori, 50)
+        self.assertTrue(product.characteristics.filter(name="Qalinligi", value="2mm").exists())
+
+    def test_import_return_flow(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin_token)
+        from products.models import Taminotchi, DokonQoldiq
+        supplier = Taminotchi.objects.create(biznes=self.biznes, nomi="Test Supplier")
+        
+        # Create product with 30 initial stock
+        product = Mahsulot.objects.create(
+            biznes=self.biznes, nomi="Brick return test",
+            kelish_narxi="1000.00", sotish_narxi="1500.00", toifa="Material"
+        )
+        product._custom_barcodes = ["555544443333"]
+        product.save()
+        
+        dq = DokonQoldiq.objects.create(mahsulot=product, dokon=self.dokon, miqdori=30)
+        product.miqdori = 30
+        product.save()
+
+        payload = {
+            "nomi": "Manual return test",
+            "import_turi": "qaytarish",
+            "dokon": self.dokon.id,
+            "taminotchi": supplier.id,
+            "tolov_turi": "nasiya",
+            "elementlar": [
+                {
+                    "nomi": "Brick return test",
+                    "shtrix_kod": "555544443333",
+                    "miqdori": 10,
+                    "kelish_narxi": 1000.0,
+                    "sotish_narxi": 1500.0
+                }
+            ]
+        }
+        
+        response = self.client.post(self.import_list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['holat'], 'yakunlangan')
+        self.assertEqual(response.data['import_turi'], 'qaytarish')
+        self.assertEqual(response.data['tolov_turi'], 'nasiya')
+        self.assertEqual(response.data['taminotchi'], supplier.id)
+
+        # Verify stock decreased to 20
+        dq.refresh_from_db()
+        self.assertEqual(dq.miqdori, 20)
+        
+        product.refresh_from_db()
+        self.assertEqual(product.miqdori, 20)
+
+        # Verify list filtering
+        filter_url = f"{self.import_list_url}?taminotchi={supplier.id}&tolov_turi=nasiya"
+        list_response = self.client.get(filter_url)
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(list_response.data['results']), 1)
+        self.assertEqual(list_response.data['results'][0]['id'], response.data['id'])
+
+    def test_import_stats_and_column_mapping(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin_token)
+        
+        # 1. API level stats check
+        payload1 = {
+            "nomi": "Kirim 1",
+            "import_turi": "kirim",
+            "dokon": self.dokon.id,
+            "elementlar": [
+                {"nomi": "Cement A", "miqdori": 100, "kelish_narxi": 5000.0, "sotish_narxi": 7000.0}
+            ]
+        }
+        res1 = self.client.post(self.import_list_url, payload1, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(res1.data['chek_raqami'].startswith('#'))
+
+        payload2 = {
+            "nomi": "Kirim 2",
+            "import_turi": "kirim",
+            "dokon": self.dokon.id,
+            "elementlar": [
+                {"nomi": "Cement B", "miqdori": 50, "kelish_narxi": 4000.0, "sotish_narxi": 6000.0}
+            ]
+        }
+        res2 = self.client.post(self.import_list_url, payload2, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_201_CREATED)
+
+        stats_url = f"{self.import_list_url}stats/?dokon={self.dokon.id}"
+        stats_res = self.client.get(stats_url)
+        self.assertEqual(stats_res.status_code, status.HTTP_200_OK)
+        # We have test_import_return_flow running too (adding 1 more import if db not cleared)
+        # So we just verify stats_res.data contains keys:
+        self.assertIn('cheklar', stats_res.data)
+        self.assertIn('soni', stats_res.data)
+        self.assertIn('jami', stats_res.data)
+        self.assertGreaterEqual(int(stats_res.data['cheklar']), 2)
+
+        # 2. Model level custom column mapping check
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from products.models import Import
+        csv_data = (
+            "Nomi_Custom,Shtrix_Custom,Miqdor_Custom,Kelish_Custom,Sotish_Custom,Olchov_Custom,Qalinligi_Custom\n"
+            "Brick,1122334455,5,100.00,150.00,dona,2.5mm\n"
+        )
+        mock_file = SimpleUploadedFile("custom_columns.csv", csv_data.encode('utf-8'), content_type="text/csv")
+        mapping = {
+            "nomi": 0,
+            "shtrix_kod": 1,
+            "miqdori": 2,
+            "kelish_narxi": 3,
+            "sotish_narxi": 4,
+            "olchov_birligi": 5,
+            "Qalinligi_Custom": 6
+        }
+        
+        import_obj = Import.objects.create(
+            biznes=self.biznes,
+            dokon=self.dokon,
+            nomi="Model mapped import",
+            fayl=mock_file,
+            column_mapping=mapping
+        )
+        import_obj.parse_and_save_elements()
+        
+        elements = import_obj.elementlar
+        self.assertEqual(len(elements), 1)
+        self.assertEqual(elements[0]['nomi'], "Brick")
+        self.assertEqual(elements[0]['shtrix_kod'], "1122334455")
+        self.assertEqual(elements[0]['miqdori'], 5)
+        self.assertEqual(elements[0]['characteristics'][0]['name'], "Qalinligi_Custom")
+        self.assertEqual(elements[0]['characteristics'][0]['value'], "2.5mm")
+
+
 
 from .models import Dokon, Transfer
 
@@ -1117,6 +1278,40 @@ class ToplamAPITestCase(APITestCase):
         response = self.client.post(self.list_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('dokon', response.data['errors'])
+
+    def test_create_composite_bundle_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
+        payload = {
+            "nomi": "Cement-Metal Super Bundle",
+            "dokon": self.dokon1.id,
+            "miqdori": 5,
+            "shtrix_kod": "121212121212",
+            "kelish_narxi": 400.00,
+            "sotish_narxi": 500.00,
+            "characteristics": [
+                {"name": "Rang", "value": "Grey"}
+            ],
+            "elementlar": [
+                {
+                    "mahsulot": self.p1.id,
+                    "miqdori": 2
+                }
+            ]
+        }
+        # First, ensure confirm_and_execute can run by executing perform_create which confirms
+        response = self.client.post(self.list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['holat'], 'yakunlangan')
+
+        # Verify component stock level (dq1 started with 10, consumed 5 * 2 = 10, so should be 0)
+        self.dq1.refresh_from_db()
+        self.assertEqual(self.dq1.miqdori, 0)
+
+        # Verify bundle product is created and has stock of 5
+        bundle_prod = Mahsulot.objects.get(shtrix_kodlar__kod="121212121212")
+        self.assertEqual(bundle_prod.nomi, "Cement-Metal Super Bundle")
+        self.assertEqual(bundle_prod.miqdori, 5)
+        self.assertTrue(bundle_prod.characteristics.filter(name="Rang", value="Grey").exists())
 
 
 class ImportAPITestCase(APITestCase):
@@ -2032,6 +2227,179 @@ class CompleteSystemWorkflowTestCase(APITestCase):
         self.assertEqual(mahsulot.miqdori, 90)
         qoldiq.refresh_from_db()
         self.assertEqual(qoldiq.miqdori, 90)
+
+    def test_ombor_stats_and_csv_export(self):
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "OmborUser",
+            "telefon_raqam": "+998901112233",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Ombor Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        ombor_stats_url = reverse('mahsulot-ombor-stats')
+        response = self.client.get(ombor_stats_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('barchasi', response.data)
+        self.assertIn('faol', response.data)
+        self.assertIn('kam_qoldiq', response.data)
+
+        # Test CSV Export
+        list_url = reverse('mahsulot-list')
+        csv_response = self.client.get(list_url, {'export': 'csv'})
+        self.assertEqual(csv_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(csv_response['Content-Type'].startswith('text/csv'))
+        self.assertIn('ombor_mahsulotlar.csv', csv_response['Content-Disposition'])
+
+    def test_top_kam_qolganlar_and_color_thresholds(self):
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "TopUser",
+            "telefon_raqam": "+998905554433",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Top Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        top_url = reverse('mahsulot-top-kam-qolganlar')
+        response = self.client.get(top_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(response.data, list)
+
+    def test_xususiyatlar_catalog_management(self):
+        from django.core.cache import cache
+        cache.clear()
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "CatalogUser",
+            "telefon_raqam": "+998906667788",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Catalog Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        xususiyatlar_url = reverse('xususiyatlar-list')
+        response = self.client.get(xususiyatlar_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        create_payload = {"nomi": "Rangilari", "tur": "matn"}
+        create_res = self.client.post(xususiyatlar_url, create_payload, format='json')
+        self.assertEqual(create_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_res.data['nomi'], "Rangilari")
+
+    def test_ombor_filters_and_bulk_action(self):
+        from django.core.cache import cache
+        cache.clear()
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "OmborUser",
+            "telefon_raqam": "+998907778899",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Ombor Filter Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        list_url = reverse('mahsulot-list')
+        res_kritik = self.client.get(list_url, {'holat_rangi': 'kritik'})
+        self.assertEqual(res_kritik.status_code, status.HTTP_200_OK)
+
+        bulk_url = reverse('mahsulot-bulk-action')
+        bulk_res = self.client.post(bulk_url, {'ids': [1], 'action': 'archive'}, format='json')
+        self.assertEqual(bulk_res.status_code, status.HTTP_200_OK)
+
+    def test_xususiyat_soft_delete_and_restore(self):
+        from django.core.cache import cache
+        cache.clear()
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "RestoreUser",
+            "telefon_raqam": "+998908889900",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Restore Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        xususiyatlar_url = reverse('xususiyatlar-list')
+        create_res = self.client.post(xususiyatlar_url, {"nomi": "Artikul", "tur": "matn"}, format='json')
+        self.assertEqual(create_res.status_code, status.HTTP_201_CREATED)
+        field_id = create_res.data['id']
+
+        detail_url = reverse('xususiyatlar-detail', kwargs={'pk': field_id})
+        del_res = self.client.delete(detail_url)
+        self.assertEqual(del_res.status_code, status.HTTP_200_OK)
+
+        restore_url = reverse('xususiyatlar-restore', kwargs={'pk': field_id})
+        restore_res = self.client.post(restore_url)
+        self.assertEqual(restore_res.status_code, status.HTTP_200_OK)
+
+    def test_expanded_ombor_filter_panel(self):
+        from django.core.cache import cache
+        cache.clear()
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "FilterUser",
+            "telefon_raqam": "+998909990011",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Filter Panel Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        list_url = reverse('mahsulot-list')
+        res_holat = self.client.get(list_url, {'holat': 'faol', 'ordering': 'nomi'})
+        self.assertEqual(res_holat.status_code, status.HTTP_200_OK)
+
+        res_kat = self.client.get(list_url, {'kategoriya': 'Qurilish'})
+        self.assertEqual(res_kat.status_code, status.HTTP_200_OK)
+
+    def test_ombor_sidebar_route_aliases(self):
+        from django.core.cache import cache
+        cache.clear()
+        register_url = reverse('register')
+        reg_payload = {
+            "ism": "SidebarUser",
+            "telefon_raqam": "+998901119988",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
+            "biznes_nomi": "Sidebar Biznes"
+        }
+        reg_response = self.client.post(register_url, reg_payload, format='json')
+        self.assertEqual(reg_response.status_code, status.HTTP_201_CREATED)
+        token = reg_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        res_hisobdan = self.client.get(reverse('hisobdan-chiqarish-list'))
+        self.assertEqual(res_hisobdan.status_code, status.HTTP_200_OK)
+
+        res_inv = self.client.get(reverse('inventarizatsiya-list'))
+        self.assertEqual(res_inv.status_code, status.HTTP_200_OK)
+
+        res_kirim = self.client.get(reverse('kirim-list'))
+        self.assertEqual(res_kirim.status_code, status.HTTP_200_OK)
 
 
 

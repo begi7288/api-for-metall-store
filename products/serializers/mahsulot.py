@@ -1,8 +1,27 @@
 from rest_framework import serializers
 from django.core.exceptions import ValidationError
 from decimal import Decimal
-from products.models import Mahsulot, Characteristic, MahsulotRasm, MahsulotShtrixKod, DokonQoldiq
+from products.models import Mahsulot, Characteristic, MahsulotRasm, MahsulotShtrixKod, DokonQoldiq, OlchovBirligi
 from user.serializers import XSSSanitizerMixin
+
+class OlchovBirligiRelatedField(serializers.PrimaryKeyRelatedField):
+    def to_internal_value(self, data):
+        if isinstance(data, int) or (isinstance(data, str) and data.isdigit()):
+            return super().to_internal_value(data)
+        
+        if isinstance(data, str):
+            request = self.context.get('request')
+            biznes = request.user.xodim.biznes if (request and request.user and hasattr(request.user, 'xodim')) else None
+            
+            val_clean = data.strip().lower()
+            unit_obj, created = OlchovBirligi.objects.get_or_create(
+                biznes=biznes,
+                short_name=val_clean,
+                defaults={'nomi': data.strip().capitalize()}
+            )
+            return unit_obj
+        
+        return super().to_internal_value(data)
 
 class CharacteristicSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     class Meta:
@@ -133,6 +152,7 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     rasm = MultiImageField(required=False, write_only=True, style={'multiple': True})
     shtrix_kod = MultiBarcodeField(required=False, style={'multiple': True})
     qoldiqlar = DokonQoldiqWriteSerializer(many=True, required=False)
+    olchov_birligi = OlchovBirligiRelatedField(queryset=OlchovBirligi.objects.all(), required=False, allow_null=True)
     characteristics = serializers.PrimaryKeyRelatedField(
         many=True,
         queryset=Characteristic.objects.all(),
@@ -148,6 +168,28 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             biznes = request.user.xodim.biznes
             from products.models import Taminotchi
             self.fields['taminotchi'].queryset = Taminotchi.objects.filter(biznes=biznes)
+            self.fields['olchov_birligi'].queryset = OlchovBirligi.objects.filter(biznes=biznes)
+
+    holat_rangi = serializers.SerializerMethodField()
+
+    def get_holat_rangi(self, obj):
+        request = self.context.get('request')
+        kritik = 10
+        kam = 20
+        if request:
+            try:
+                kritik = int(request.query_params.get('kritik_chegara', 10))
+                kam = int(request.query_params.get('kam_chegara', 20))
+            except ValueError:
+                pass
+        
+        miqdor = obj.miqdori if obj.miqdori is not None else 0
+        if miqdor <= kritik:
+            return 'kritik'
+        elif miqdor <= kam:
+            return 'kam'
+        else:
+            return 'normal'
 
     class Meta:
         model = Mahsulot
@@ -156,7 +198,7 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             'kelish_narxi', 'ustama', 'sotish_narxi', 'ulgurji_narx', 'miqdori',
             'ogohlantirish', 'is_active', 'toifa', 'brend', 'taminotchi', 'taminotchi_nomi',
             'erkin_narx', 'tavsif', 'characteristics', 'qoldiqlar', 'yaratilgan_vaqt',
-            'yangilangan_vaqt', 'kam_qoldi', 'dokon'
+            'yangilangan_vaqt', 'kam_qoldi', 'dokon', 'holat_rangi'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
@@ -312,6 +354,7 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
+        representation['olchov_birligi'] = instance.olchov_birligi.short_name if instance.olchov_birligi else ""
         representation['rasm'] = MahsulotRasmSerializer(
             instance.rasmlar.all(),
             many=True,
@@ -340,7 +383,18 @@ class XususiyatMaydoniSerializer(XSSSanitizerMixin, serializers.ModelSerializer)
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
     def get_tur_display(self, obj):
-        return "Matn"
+        tur_map = {
+            'matn': 'Matn',
+            'text': 'Matn',
+            'raqam': 'Raqam',
+            'number': 'Raqam',
+            'tanlov': 'Tanlov',
+            'select': 'Tanlov',
+            'sana': 'Sana',
+            'date': 'Sana',
+        }
+        val = str(obj.tur).lower() if obj.tur else 'matn'
+        return tur_map.get(val, val.capitalize())
 
     def validate(self, attrs):
         nomi = attrs.get('nomi')
@@ -393,6 +447,15 @@ class ToplamSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     dokon_nomi = serializers.ReadOnlyField(source='dokon.nomi')
     yaratgan_xodim_nomi = serializers.SerializerMethodField()
 
+    # Write-only fields for bundle finished product creation
+    shtrix_kod = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    sotish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, write_only=True, required=False)
+    kelish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, write_only=True, required=False)
+    ustama = serializers.DecimalField(max_digits=5, decimal_places=2, write_only=True, required=False)
+    ulgurji_narx = serializers.DecimalField(max_digits=12, decimal_places=2, write_only=True, required=False)
+    rasm = serializers.ListField(child=serializers.ImageField(), write_only=True, required=False)
+    characteristics = serializers.JSONField(write_only=True, required=False)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get('request')
@@ -403,11 +466,12 @@ class ToplamSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     class Meta:
         model = Toplam
         fields = [
-            'id', 'biznes', 'dokon', 'dokon_nomi', 'nomi', 'holat', 'miqdori', 'summa',
-            'elementlar', 'yaratgan_xodim', 'yaratgan_xodim_nomi', 'yaratilgan_vaqt', 'yangilangan_vaqt'
+            'id', 'biznes', 'mahsulot', 'dokon', 'dokon_nomi', 'nomi', 'holat', 'miqdori', 'summa',
+            'elementlar', 'yaratgan_xodim', 'yaratgan_xodim_nomi', 'yaratilgan_vaqt', 'yangilangan_vaqt',
+            'shtrix_kod', 'sotish_narxi', 'kelish_narxi', 'ustama', 'ulgurji_narx', 'rasm', 'characteristics'
         ]
         read_only_fields = [
-            'biznes', 'holat', 'miqdori', 'summa', 'yaratgan_xodim', 'yaratilgan_vaqt', 'yangilangan_vaqt'
+            'biznes', 'mahsulot', 'holat', 'summa', 'yaratgan_xodim', 'yaratilgan_vaqt', 'yangilangan_vaqt'
         ]
 
     def get_yaratgan_xodim_nomi(self, obj):
@@ -436,6 +500,16 @@ class ToplamSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
     def create(self, validated_data):
         elementlar_data = validated_data.pop('elementlar', [])
+        
+        # Finished product parameters
+        shtrix_kod = validated_data.pop('shtrix_kod', None)
+        sotish_narxi = validated_data.pop('sotish_narxi', None)
+        kelish_narxi = validated_data.pop('kelish_narxi', None)
+        ustama = validated_data.pop('ustama', None)
+        ulgurji_narx = validated_data.pop('ulgurji_narx', None)
+        rasm_files = validated_data.pop('rasm', None)
+        characteristics_data = validated_data.pop('characteristics', None)
+
         request = self.context.get('request')
         biznes = None
         yaratgan_xodim = None
@@ -443,7 +517,64 @@ class ToplamSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             yaratgan_xodim = request.user.xodim
             biznes = yaratgan_xodim.biznes
 
-        toplam = Toplam.objects.create(biznes=biznes, yaratgan_xodim=yaratgan_xodim, **validated_data)
+        finished_product = None
+        if shtrix_kod or sotish_narxi is not None or validated_data.get('nomi'):
+            # Check if this is a finished bundle product creation
+            # If the user just wanted a legacy batch replenishment, they would not submit shtrix_kod or prices.
+            # However, we can check if it's explicitly intended. Let's check if any of these are present.
+            if shtrix_kod or sotish_narxi is not None or rasm_files or characteristics_data:
+                from products.models import OlchovBirligi, Mahsulot, MahsulotShtrixKod, MahsulotRasm, Characteristic
+                
+                # Resolve unit 'dona' or create it
+                unit_obj, _ = OlchovBirligi.objects.get_or_create(
+                    biznes=biznes,
+                    short_name='dona',
+                    defaults={'nomi': 'Dona'}
+                )
+                
+                k_narx = kelish_narxi or Decimal('0.00')
+                s_narx = sotish_narxi or Decimal('0.00')
+                ust = ustama or Decimal('0.00')
+                if k_narx > 0 and s_narx > 0:
+                    ust = (((s_narx - k_narx) / k_narx) * Decimal('100.00')).quantize(Decimal('0.01'))
+                elif k_narx > 0 and ust > 0:
+                    s_narx = (k_narx * (Decimal('1.00') + ust / Decimal('100.00'))).quantize(Decimal('0.01'))
+
+                finished_product = Mahsulot.objects.create(
+                    biznes=biznes,
+                    nomi=validated_data.get('nomi') or "Yangi To'plam",
+                    olchov_birligi=unit_obj,
+                    kelish_narxi=k_narx,
+                    sotish_narxi=s_narx,
+                    ustama=ust,
+                    ulgurji_narx=ulgurji_narx or Decimal('0.00'),
+                    miqdori=0
+                )
+
+                if shtrix_kod:
+                    MahsulotShtrixKod.objects.create(mahsulot=finished_product, kod=shtrix_kod)
+                else:
+                    finished_product.shtrix_kod = finished_product.generate_unique_barcode()
+                    finished_product.save()
+
+                if rasm_files:
+                    for f in rasm_files:
+                        MahsulotRasm.objects.create(mahsulot=finished_product, rasm=f)
+
+                if characteristics_data:
+                    if isinstance(characteristics_data, list):
+                        for char_item in characteristics_data:
+                            c_name = char_item.get('name')
+                            c_val = char_item.get('value')
+                            if c_name and c_val:
+                                Characteristic.objects.create(mahsulot=finished_product, name=c_name, value=c_val)
+
+        toplam = Toplam.objects.create(
+            biznes=biznes,
+            yaratgan_xodim=yaratgan_xodim,
+            mahsulot=finished_product,
+            **validated_data
+        )
 
         for item_data in elementlar_data:
             mahsulot = item_data['mahsulot']

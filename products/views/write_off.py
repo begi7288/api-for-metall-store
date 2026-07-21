@@ -78,6 +78,8 @@ class WriteOffViewSet(viewsets.ModelViewSet):
         xodim = request.user.xodim if hasattr(request.user, 'xodim') else None
         try:
             write_off_obj.confirm_and_execute(executor_xodim=xodim)
+            from user.telegram_bot import notify_write_off
+            notify_write_off(write_off_obj)
         except DjangoValidationError as e:
             raise serializers.ValidationError({'detail': str(e)})
         return Response({

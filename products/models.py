@@ -41,6 +41,7 @@ from temirdokon_v1.models import BaseModel
 from user.models import Biznes
 
 class Characteristic(BaseModel):
+    mahsulot = models.ForeignKey('Mahsulot', on_delete=models.CASCADE, null=True, blank=True, related_name='characteristics')
     name = models.CharField(max_length=255)
     value = models.CharField(max_length=255)
 
@@ -48,15 +49,9 @@ class Characteristic(BaseModel):
         return f"{self.name}: {self.value}"
 
 class Mahsulot(BaseModel):
-    OLCHOV_CHOICES = (
-        ('kg', 'Kilogramm'),
-        ('dona', 'Dona'),
-        ('metr', 'Metr'),
-        ('litr', 'Litr'),
-    )
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='mahsulotlar', null=True, blank=True)
     nomi = models.CharField(max_length=255)
-    olchov_birligi = models.CharField(max_length=50, choices=OLCHOV_CHOICES)
+    olchov_birligi = models.ForeignKey('OlchovBirligi', on_delete=models.PROTECT, related_name='mahsulotlar', null=True, blank=True)
     kelish_narxi = models.DecimalField(max_digits=12, decimal_places=2)
     ustama = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, validators=[MinValueValidator(0.00), MaxValueValidator(100.00)])
     sotish_narxi = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
@@ -69,10 +64,32 @@ class Mahsulot(BaseModel):
     erkin_narx = models.BooleanField(default=False)
     ulgurji_narx = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), blank=True, null=True)
     tavsif = models.TextField(blank=True, null=True)
-    characteristics = models.ManyToManyField(Characteristic, blank=True, related_name='mahsulotlar')
     dokonlar = models.ManyToManyField('Dokon', through='DokonQoldiq', related_name='mahsulotlar')
 
+    def __init__(self, *args, **kwargs):
+        if 'olchov_birligi' in kwargs and isinstance(kwargs['olchov_birligi'], str):
+            val = kwargs.pop('olchov_birligi')
+            self._temp_olchov_birligi = val
+        super().__init__(*args, **kwargs)
+
+    def __setattr__(self, name, value):
+        if name == 'olchov_birligi' and isinstance(value, str):
+            self._temp_olchov_birligi = value
+            return
+        super().__setattr__(name, value)
+
     def clean(self):
+        if hasattr(self, '_temp_olchov_birligi'):
+            val = getattr(self, '_temp_olchov_birligi')
+            from products.models import OlchovBirligi
+            unit_obj, created = OlchovBirligi.objects.get_or_create(
+                biznes=self.biznes,
+                short_name=val.lower().strip(),
+                defaults={'nomi': val.capitalize()}
+            )
+            self.olchov_birligi = unit_obj
+            delattr(self, '_temp_olchov_birligi')
+
         super().clean()
 
         # 1. Boundary validations
@@ -99,6 +116,17 @@ class Mahsulot(BaseModel):
                 self.sotish_narxi = (self.kelish_narxi * (Decimal('1.00') + self.ustama / Decimal('100.00'))).quantize(Decimal('0.01'))
 
     def save(self, *args, **kwargs):
+        if hasattr(self, '_temp_olchov_birligi'):
+            val = getattr(self, '_temp_olchov_birligi')
+            from products.models import OlchovBirligi
+            unit_obj, created = OlchovBirligi.objects.get_or_create(
+                biznes=self.biznes,
+                short_name=val.lower().strip(),
+                defaults={'nomi': val.capitalize()}
+            )
+            self.olchov_birligi = unit_obj
+            delattr(self, '_temp_olchov_birligi')
+
         is_new = not self.pk
         super().save(*args, **kwargs)
         if is_new:
@@ -117,7 +145,8 @@ class Mahsulot(BaseModel):
                 return code
 
     def __str__(self):
-        return f"{self.nomi} ({self.miqdori} {self.get_olchov_birligi_display()})"
+        unit_str = self.olchov_birligi.short_name if self.olchov_birligi else ""
+        return f"{self.nomi} ({self.miqdori} {unit_str})"
 
     @property
     def shtrix_kod(self):
@@ -169,13 +198,21 @@ class Import(BaseModel):
     TURI_CHOICES = (
         ('kirim', 'Kirim'),
         ('qoldiq_kirimi', 'Qoldiq kirimi'),
+        ('qaytarish', 'Qaytarish'),
+        ('ko_chirish', 'Ko\'chirish'),
     )
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='importlar', null=True, blank=True)
     dokon = models.ForeignKey('Dokon', on_delete=models.CASCADE, related_name='importlar', null=True, blank=True)
+    taminotchi = models.ForeignKey('Taminotchi', on_delete=models.SET_NULL, null=True, blank=True, related_name='importlar')
+    tolov_turi = models.CharField(max_length=20, choices=(('naqd', 'Naqd'), ('nasiya', 'Nasiya'), ('karta', 'Karta')), default='naqd')
+    chek_raqami = models.CharField(max_length=50, blank=True, null=True)
+    column_mapping = models.JSONField(default=dict, blank=True)
     nomi = models.CharField(max_length=255)
     fayl = models.FileField(
         upload_to='importlar/',
-        validators=[validate_import_file_extension, validate_import_file_size]
+        validators=[validate_import_file_extension, validate_import_file_size],
+        null=True,
+        blank=True
     )
     holat = models.CharField(max_length=20, choices=HOLAT_CHOICES, default='kutilmoqda')
     import_turi = models.CharField(max_length=20, choices=TURI_CHOICES, default='kirim')
@@ -194,6 +231,9 @@ class Import(BaseModel):
             raise ValidationError({'nomi': "Import nomi kiritilishi shart."})
 
     def save(self, *args, **kwargs):
+        if not self.chek_raqami:
+            import random
+            self.chek_raqami = f"#{random.randint(100000, 999999)}"
         is_new = not self.pk
         super().save(*args, **kwargs)
         if is_new and self.fayl:
@@ -237,54 +277,71 @@ class Import(BaseModel):
 
         headers = [str(h).lower().strip() for h in rows[0]]
         col_mapping = {}
-        for idx, h in enumerate(headers):
-            if any(k in h for k in ['nomi', 'name', 'наименование', 'tovar']):
-                col_mapping['nomi'] = idx
-            elif any(k in h for k in ['shtrix', 'barcode', 'barkod', 'баркод', 'kod', 'код']):
-                col_mapping['shtrix_kod'] = idx
-            elif any(k in h for k in ['miqdor', 'qty', 'kol', 'кол']):
-                col_mapping['miqdori'] = idx
-            elif any(k in h for k in ['kelish', 'cost', 'поставки']):
-                col_mapping['kelish_narxi'] = idx
-            elif any(k in h for k in ['sotish', 'retail', 'продажи', 'sotuv', 'розничная']):
-                col_mapping['sotish_narxi'] = idx
-            elif any(k in h for k in ['birlik', 'unit', 'единица', 'o\'lchov']):
-                col_mapping['olchov_birligi'] = idx
-            elif any(k in h for k in ['toifa', 'category', 'категория']):
-                col_mapping['toifa'] = idx
-            elif any(k in h for k in ['brend', 'brand', 'бренд']):
-                col_mapping['brend'] = idx
-            elif any(k in h for k in ['taminotchi', 'supplier', 'поставщик', 'yetkazib']):
-                col_mapping['taminotchi'] = idx
-            elif any(k in h for k in ['tavsif', 'description', 'описание']):
-                col_mapping['tavsif'] = idx
-            elif any(k in h for k in ['xususiyat', 'characteristic', 'feature']):
-                col_mapping['characteristics'] = idx
-
-        # Find active custom fields mapping dynamically
-        from products.models import XususiyatMaydoni
-        active_fields = XususiyatMaydoni.objects.filter(biznes=self.biznes, is_active=True)
-        active_field_names = [f.nomi.lower().strip() for f in active_fields]
-        
         custom_col_mapping = {}
-        for idx, h in enumerate(headers):
-            if h in active_field_names:
-                matching_field = next(f for f in active_fields if f.nomi.lower().strip() == h)
-                custom_col_mapping[matching_field.nomi] = idx
 
-        # Fallback to column indices if auto-detect fails
-        if 'nomi' not in col_mapping and len(headers) > 0:
-            col_mapping['nomi'] = 0
-        if 'shtrix_kod' not in col_mapping and len(headers) > 1:
-            col_mapping['shtrix_kod'] = 1
-        if 'miqdori' not in col_mapping and len(headers) > 2:
-            col_mapping['miqdori'] = 2
-        if 'kelish_narxi' not in col_mapping and len(headers) > 3:
-            col_mapping['kelish_narxi'] = 3
-        if 'sotish_narxi' not in col_mapping and len(headers) > 4:
-            col_mapping['sotish_narxi'] = 4
-        if 'olchov_birligi' not in col_mapping and len(headers) > 5:
-            col_mapping['olchov_birligi'] = 5
+        standard_keys = ['nomi', 'shtrix_kod', 'miqdori', 'kelish_narxi', 'sotish_narxi', 'olchov_birligi', 'toifa', 'brend', 'taminotchi', 'tavsif']
+
+        if self.column_mapping and isinstance(self.column_mapping, dict):
+            for key, val in self.column_mapping.items():
+                if key in standard_keys:
+                    try:
+                        col_mapping[key] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    try:
+                        custom_col_mapping[key] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+        else:
+            for idx, h in enumerate(headers):
+                if any(k in h for k in ['nomi', 'name', 'наименование', 'tovar']):
+                    col_mapping['nomi'] = idx
+                elif any(k in h for k in ['shtrix', 'barcode', 'barkod', 'баркод', 'kod', 'код']):
+                    col_mapping['shtrix_kod'] = idx
+                elif any(k in h for k in ['miqdor', 'qty', 'kol', 'кол']):
+                    col_mapping['miqdori'] = idx
+                elif any(k in h for k in ['kelish', 'cost', 'поставки']):
+                    col_mapping['kelish_narxi'] = idx
+                elif any(k in h for k in ['sotish', 'retail', 'продажи', 'sotuv', 'розничная']):
+                    col_mapping['sotish_narxi'] = idx
+                elif any(k in h for k in ['birlik', 'unit', 'единица', 'o\'lchov']):
+                    col_mapping['olchov_birligi'] = idx
+                elif any(k in h for k in ['toifa', 'category', 'категория']):
+                    col_mapping['toifa'] = idx
+                elif any(k in h for k in ['brend', 'brand', 'бренд']):
+                    col_mapping['brend'] = idx
+                elif any(k in h for k in ['taminotchi', 'supplier', 'поставщик', 'yetkazib']):
+                    col_mapping['taminotchi'] = idx
+                elif any(k in h for k in ['tavsif', 'description', 'описание']):
+                    col_mapping['tavsif'] = idx
+                elif any(k in h for k in ['xususiyat', 'characteristic', 'feature']):
+                    col_mapping['characteristics'] = idx
+
+            # Find active custom fields mapping dynamically
+            from products.models import XususiyatMaydoni
+            active_fields = XususiyatMaydoni.objects.filter(biznes=self.biznes, is_active=True)
+            active_field_names = [f.nomi.lower().strip() for f in active_fields]
+            
+            for idx, h in enumerate(headers):
+                if h in active_field_names:
+                    matching_field = next(f for f in active_fields if f.nomi.lower().strip() == h)
+                    custom_col_mapping[matching_field.nomi] = idx
+
+        # Fallback to column indices if auto-detect fails and no custom column mapping provided
+        if not self.column_mapping:
+            if 'nomi' not in col_mapping and len(headers) > 0:
+                col_mapping['nomi'] = 0
+            if 'shtrix_kod' not in col_mapping and len(headers) > 1:
+                col_mapping['shtrix_kod'] = 1
+            if 'miqdori' not in col_mapping and len(headers) > 2:
+                col_mapping['miqdori'] = 2
+            if 'kelish_narxi' not in col_mapping and len(headers) > 3:
+                col_mapping['kelish_narxi'] = 3
+            if 'sotish_narxi' not in col_mapping and len(headers) > 4:
+                col_mapping['sotish_narxi'] = 4
+            if 'olchov_birligi' not in col_mapping and len(headers) > 5:
+                col_mapping['olchov_birligi'] = 5
 
         parsed_items = []
         total_qty = 0
@@ -485,6 +542,8 @@ class Import(BaseModel):
                     qoldiq, created = DokonQoldiq.objects.get_or_create(mahsulot=product, dokon=self.dokon)
                     if self.import_turi == 'kirim':
                         qoldiq.miqdori += miqdori
+                    elif self.import_turi == 'qaytarish':
+                        qoldiq.miqdori = max(0, qoldiq.miqdori - miqdori)
                     else:
                         qoldiq.miqdori = miqdori
                     qoldiq.save()
@@ -492,6 +551,8 @@ class Import(BaseModel):
                 else:
                     if self.import_turi == 'kirim':
                         product.miqdori += miqdori
+                    elif self.import_turi == 'qaytarish':
+                        product.miqdori = max(0, product.miqdori - miqdori)
                     else:
                         product.miqdori = miqdori
 
@@ -547,12 +608,16 @@ class Import(BaseModel):
                     new_prod._custom_barcodes = [code]
                 new_prod.save()
                 
+                initial_qty = miqdori
+                if self.import_turi == 'qaytarish':
+                    initial_qty = 0
+
                 if self.dokon:
-                    DokonQoldiq.objects.create(mahsulot=new_prod, dokon=self.dokon, miqdori=miqdori)
-                    new_prod.miqdori = miqdori
+                    DokonQoldiq.objects.create(mahsulot=new_prod, dokon=self.dokon, miqdori=initial_qty)
+                    new_prod.miqdori = initial_qty
                     new_prod.save(update_fields=['miqdori'])
                 else:
-                    new_prod.miqdori = miqdori
+                    new_prod.miqdori = initial_qty
                     new_prod.save(update_fields=['miqdori'])
 
                 if characteristics_objs:
@@ -659,7 +724,7 @@ class Transfer(BaseModel):
                         'nomi': product.nomi,
                         'shtrix_kod': product.shtrix_kod,
                         'miqdori': miqdori,
-                        'olchov_birligi': product.olchov_birligi
+                        'olchov_birligi': product.olchov_birligi.short_name if product.olchov_birligi else ""
                     })
                     total_qty += miqdori
                     total_sum += Decimal(str(product.sotish_narxi or product.kelish_narxi or 0.0)) * miqdori
@@ -801,7 +866,7 @@ class Transfer(BaseModel):
                 'nomi': product.nomi if product else nomi,
                 'shtrix_kod': product.shtrix_kod if product else shtrix_kod,
                 'miqdori': miqdori,
-                'olchov_birligi': product.olchov_birligi if product else olchov_birligi
+                'olchov_birligi': (product.olchov_birligi.short_name if product.olchov_birligi else "") if product else olchov_birligi
             })
 
         if row_errors:
@@ -1015,6 +1080,7 @@ class XususiyatMaydoni(BaseModel):
 
 class Toplam(BaseModel):
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='toplamlar', null=True, blank=True)
+    mahsulot = models.OneToOneField('Mahsulot', on_delete=models.SET_NULL, null=True, blank=True, related_name='toplam_detallari')
     nomi = models.CharField(max_length=255, blank=True, null=True)
     dokon = models.ForeignKey('Dokon', on_delete=models.CASCADE, related_name='toplamlar')
     holat = models.CharField(max_length=50, default='qoralama', choices=(('qoralama', 'Qoralama'), ('yakunlangan', 'Tasdiqlangan')))
@@ -1032,23 +1098,53 @@ class Toplam(BaseModel):
         if not self.elementlar.exists():
             raise ValidationError("To'plamga kamida bitta mahsulot kiritilgan bo'lishi shart.")
 
-        for item in self.elementlar.all():
-            product = item.mahsulot
-            qty = item.miqdori
+        if self.mahsulot:
+            # Bundle production: deduct component quantities from stock, add bundle quantity to stock
+            errors = []
+            for item in self.elementlar.all():
+                comp = item.mahsulot
+                needed = item.miqdori * self.miqdori
+                qoldiq = DokonQoldiq.objects.filter(mahsulot=comp, dokon=self.dokon).first()
+                avail = qoldiq.miqdori if qoldiq else 0
+                if avail < needed:
+                    errors.append(f"Omborda '{comp.nomi}' mahsulotidan yetarli miqdor yo'q. Kerak: {needed}, Mavjud: {avail}.")
+            
+            if errors:
+                raise ValidationError(errors)
 
-            # Find or create dokon qoldiq
-            qoldiq, created = DokonQoldiq.objects.get_or_create(
-                mahsulot=product, 
+            for item in self.elementlar.all():
+                comp = item.mahsulot
+                needed = item.miqdori * self.miqdori
+                qoldiq, _ = DokonQoldiq.objects.get_or_create(mahsulot=comp, dokon=self.dokon)
+                qoldiq.miqdori -= needed
+                qoldiq.save()
+                comp.miqdori = sum(q.miqdori for q in comp.qoldiqlar.all())
+                comp.save(update_fields=['miqdori'])
+
+            finished_qoldiq, _ = DokonQoldiq.objects.get_or_create(
+                mahsulot=self.mahsulot,
                 dokon=self.dokon,
                 defaults={'miqdori': 0, 'ogohlantirish': 0}
             )
-            # Add stock
-            qoldiq.miqdori += qty
-            qoldiq.save()
+            finished_qoldiq.miqdori += self.miqdori
+            finished_qoldiq.save()
 
-            # Recalculate total product count
-            product.miqdori = sum(q.miqdori for q in product.qoldiqlar.all())
-            product.save(update_fields=['miqdori'])
+            self.mahsulot.miqdori = sum(q.miqdori for q in self.mahsulot.qoldiqlar.all())
+            self.mahsulot.save(update_fields=['miqdori'])
+        else:
+            # Legacy replenishment batch
+            for item in self.elementlar.all():
+                product = item.mahsulot
+                qty = item.miqdori
+                qoldiq, created = DokonQoldiq.objects.get_or_create(
+                    mahsulot=product, 
+                    dokon=self.dokon,
+                    defaults={'miqdori': 0, 'ogohlantirish': 0}
+                )
+                qoldiq.miqdori += qty
+                qoldiq.save()
+                product.miqdori = sum(q.miqdori for q in product.qoldiqlar.all())
+                product.save(update_fields=['miqdori'])
 
         self.holat = 'yakunlangan'
         self.save()
@@ -1079,13 +1175,15 @@ class ToplamElement(BaseModel):
     def delete(self, *args, **kwargs):
         toplam = self.toplam
         super().delete(*args, **kwargs)
-        toplam.miqdori = toplam.elementlar.aggregate(total=models.Sum('miqdori'))['total'] or 0
+        if not toplam.mahsulot_id:
+            toplam.miqdori = toplam.elementlar.aggregate(total=models.Sum('miqdori'))['total'] or 0
         toplam.summa = toplam.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
         toplam.save()
 
     def recalculate_totals(self):
         toplam = self.toplam
-        toplam.miqdori = toplam.elementlar.aggregate(total=models.Sum('miqdori'))['total'] or 0
+        if not toplam.mahsulot_id:
+            toplam.miqdori = toplam.elementlar.aggregate(total=models.Sum('miqdori'))['total'] or 0
         toplam.summa = toplam.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
         toplam.save()
 
