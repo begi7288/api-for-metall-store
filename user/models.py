@@ -86,11 +86,8 @@ class Xodim(BaseModel):
             if not phone.isdigit():
                 raise ValidationError({'telefon_raqam': "Telefon raqami faqat raqamlardan iborat bo'lishi kerak (ixtiyoriy '+' belgisi bilan)."})
             
-            if not re.match(r"^(998)?\d{9}$", phone):
+            if not re.match(r"^\d{7,15}$", phone):
                 raise ValidationError({'telefon_raqam': "Telefon raqami noto'g'ri formatda kiritildi."})
-                
-            if has_plus and len(phone) != 12:
-                raise ValidationError({'telefon_raqam': "+ bilan boshlangan telefon raqami 13 ta belgidan iborat bo'lishi kerak."})
 
         # 3. Password strength validation
         validate_password_strength(self.parol)
