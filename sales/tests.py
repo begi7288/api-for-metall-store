@@ -182,3 +182,25 @@ class SalesAPITestCase(APITestCase):
         # Stock should be restored to 100
         self.qoldiq1.refresh_from_db()
         self.assertEqual(self.qoldiq1.miqdori, 100)
+
+    def test_export_sales_to_excel(self):
+        self.client.force_authenticate(user=self.sotuvchi_user.user)
+        # Create a sale first
+        payload = {
+            "dokon": self.dokon.id,
+            "kod": "SOTUV-EXCEL",
+            "holat": "kechiktirilgan",
+            "elementlar": [
+                {
+                    "mahsulot": self.product1.id,
+                    "miqdori": 2
+                }
+            ]
+        }
+        self.client.post(self.sales_list_url, payload, format='json')
+
+        # Now retrieve list with export=excel
+        response = self.client.get(self.sales_list_url, {'export': 'excel'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertTrue(response['Content-Disposition'].startswith('attachment; filename='))
