@@ -194,9 +194,15 @@ class RegisterSerializer(serializers.ModelSerializer):
             parolni_tasdiqlash = parol
             attrs['parol'] = parol
             attrs['parolni_tasdiqlash'] = parol
-
-        if parol != parolni_tasdiqlash:
-            raise serializers.ValidationError({'parolni_tasdiqlash': "Parollar bir-biriga mos kelmadi."})
+        else:
+            if parol != parolni_tasdiqlash:
+                raise serializers.ValidationError({'parolni_tasdiqlash': "Parollar bir-biriga mos kelmadi."})
+            from user.models import validate_password_strength
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            try:
+                validate_password_strength(parol)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError({'parol': e.messages if hasattr(e, 'messages') else str(e)})
 
         self.context['raw_password'] = parol
         attrs.pop('parolni_tasdiqlash', None)
