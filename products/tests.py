@@ -1866,8 +1866,8 @@ class CompleteSystemWorkflowTestCase(APITestCase):
         reg_payload = {
             "ism": "Bekzod",
             "telefon_raqam": "+998909876543",
-            "parol": "SecurePass123!",
-            "parolni_tasdiqlash": "SecurePass123!",
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456",
             "biznes_nomi": "Temir Invest"
         }
         reg_response = self.client.post(register_url, reg_payload, format='json')

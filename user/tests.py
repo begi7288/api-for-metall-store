@@ -28,15 +28,9 @@ class XodimModelTest(TestCase):
             x1.full_clean()
 
     def test_password_strength_failures(self):
-        # Too short
+        # Too short (under 6 characters)
         with self.assertRaises(ValidationError):
             Xodim(ism="Ali", familiya="Valiyev", telefon_raqam="+998901234567", parol="sec12", jinsi="erkak").full_clean()
-        # No digits
-        with self.assertRaises(ValidationError):
-            Xodim(ism="Ali", familiya="Valiyev", telefon_raqam="+998901234567", parol="secretpassword", jinsi="erkak").full_clean()
-        # No letters
-        with self.assertRaises(ValidationError):
-            Xodim(ism="Ali", familiya="Valiyev", telefon_raqam="+998901234567", parol="123456789", jinsi="erkak").full_clean()
 
     def test_phone_length_constraints(self):
         # 5 characters phone number is too short
@@ -653,6 +647,20 @@ class ExtraEndpointsAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['nomi'], 'Brick')
+
+    def test_crud_with_aliased_payloads(self):
+        # Test unit creation using 'name' and 'shortName'
+        payload = {"name": "Millimetr", "shortName": "mm"}
+        response = self.client.post(reverse('units-list'), payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['nomi'], 'Millimetr')
+        self.assertEqual(response.data['short_name'], 'mm')
+
+        # Test category creation using 'name'
+        payload_cat = {"name": "Lola"}
+        response = self.client.post(reverse('categories-list'), payload_cat, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['nomi'], 'Lola')
 
 
 

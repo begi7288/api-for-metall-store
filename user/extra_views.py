@@ -11,22 +11,67 @@ from products.serializers import MahsulotSerializer
 # ============================================================
 
 class MahsulotToifasiSerializer(serializers.ModelSerializer):
+    nomi = serializers.CharField(required=False)
+    name = serializers.CharField(required=False)
+
     class Meta:
         model = MahsulotToifasi
-        fields = ['id', 'biznes', 'nomi']
+        fields = ['id', 'biznes', 'nomi', 'name']
         read_only_fields = ['biznes']
+
+    def validate(self, attrs):
+        nomi = attrs.get('nomi') or attrs.get('name')
+        if not nomi:
+            raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+        attrs['nomi'] = nomi
+        attrs.pop('name', None)
+        return attrs
 
 class OlchovBirligiSerializer(serializers.ModelSerializer):
+    nomi = serializers.CharField(required=False)
+    name = serializers.CharField(required=False)
+    short_name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    shortName = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
     class Meta:
         model = OlchovBirligi
-        fields = ['id', 'biznes', 'nomi', 'short_name']
+        fields = ['id', 'biznes', 'nomi', 'name', 'short_name', 'shortName']
         read_only_fields = ['biznes']
 
+    def validate(self, attrs):
+        nomi = attrs.get('nomi') or attrs.get('name')
+        if not nomi:
+            raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+        attrs['nomi'] = nomi
+        attrs.pop('name', None)
+
+        short_name = attrs.get('short_name') or attrs.get('shortName')
+        attrs['short_name'] = short_name
+        attrs.pop('shortName', None)
+        return attrs
+
 class XodimRoliSerializer(serializers.ModelSerializer):
+    nomi = serializers.CharField(required=False)
+    name = serializers.CharField(required=False)
+    role_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    roleId = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
     class Meta:
         model = XodimRoli
-        fields = ['id', 'biznes', 'nomi', 'role_id']
+        fields = ['id', 'biznes', 'nomi', 'name', 'role_id', 'roleId']
         read_only_fields = ['biznes']
+
+    def validate(self, attrs):
+        nomi = attrs.get('nomi') or attrs.get('name')
+        if not nomi:
+            raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+        attrs['nomi'] = nomi
+        attrs.pop('name', None)
+
+        role_id = attrs.get('role_id') or attrs.get('roleId')
+        attrs['role_id'] = role_id
+        attrs.pop('roleId', None)
+        return attrs
 
 
 # ============================================================
