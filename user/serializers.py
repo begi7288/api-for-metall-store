@@ -197,12 +197,8 @@ class RegisterSerializer(serializers.ModelSerializer):
         else:
             if parol != parolni_tasdiqlash:
                 raise serializers.ValidationError({'parolni_tasdiqlash': "Parollar bir-biriga mos kelmadi."})
-            from user.models import validate_password_strength
-            from django.core.exceptions import ValidationError as DjangoValidationError
-            try:
-                validate_password_strength(parol)
-            except DjangoValidationError as e:
-                raise serializers.ValidationError({'parol': e.messages if hasattr(e, 'messages') else str(e)})
+            if not parol.isdigit() or len(parol) != 6:
+                raise serializers.ValidationError({'parol': "Tasdiqlash kodi faqat 6 talik raqamdan iborat bo'lishi kerak."})
 
         self.context['raw_password'] = parol
         attrs.pop('parolni_tasdiqlash', None)

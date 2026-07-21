@@ -215,8 +215,8 @@ class RegisterAPITestCase(APITestCase):
         payload = {
             "ism": "Vali",
             "telefon_raqam": "+998901111111",
-            "parol": "SecurePass123!",
-            "parolni_tasdiqlash": "SecurePass123!"
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456"
         }
         response = self.client.post(self.register_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -253,8 +253,8 @@ class RegisterAPITestCase(APITestCase):
             "ism": "Hacker",
             "telefon_raqam": "+998902222222",
             "rol": "sotuvchi",
-            "parol": "SecurePass123!",
-            "parolni_tasdiqlash": "SecurePass123!"
+            "parol": "123456",
+            "parolni_tasdiqlash": "123456"
         }
         response = self.client.post(self.register_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -264,8 +264,8 @@ class RegisterAPITestCase(APITestCase):
         payload = {
             "ism": "Vali",
             "telefon_raqam": "+998903333333",
-            "parol": "SecurePass123!",
-            "parolni_tasdiqlash": "differentpwd"
+            "parol": "123456",
+            "parolni_tasdiqlash": "654321"
         }
         response = self.client.post(self.register_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
