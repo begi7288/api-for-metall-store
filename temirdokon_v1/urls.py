@@ -28,9 +28,8 @@ urlpatterns = [
     path('products/order/', include('orders.urls')),
     path('products/', include('products.urls')),
     
-    # Missing root-level endpoints with full CRUD mapping
     path('roles/', RolesViewSet.as_view({'get': 'list', 'post': 'create'}), name='roles-list'),
-    path('roles/<int:pk>/', RolesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='roles-detail'),
+    path('roles/<str:pk>/', RolesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='roles-detail'),
     
     path('categories/', CategoriesViewSet.as_view({'get': 'list', 'post': 'create'}), name='categories-list'),
     path('categories/<int:pk>/', CategoriesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='categories-detail'),

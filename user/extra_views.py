@@ -22,7 +22,10 @@ class MahsulotToifasiSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         nomi = attrs.get('nomi') or attrs.get('name')
         if not nomi:
-            raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+            if self.instance and hasattr(self.instance, 'nomi'):
+                nomi = self.instance.nomi
+            else:
+                raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
         attrs['nomi'] = nomi
         attrs.pop('name', None)
         return attrs
@@ -41,11 +44,16 @@ class OlchovBirligiSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         nomi = attrs.get('nomi') or attrs.get('name')
         if not nomi:
-            raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+            if self.instance and hasattr(self.instance, 'nomi'):
+                nomi = self.instance.nomi
+            else:
+                raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
         attrs['nomi'] = nomi
         attrs.pop('name', None)
 
         short_name = attrs.get('short_name') or attrs.get('shortName')
+        if short_name is None and self.instance and hasattr(self.instance, 'short_name'):
+            short_name = self.instance.short_name
         attrs['short_name'] = short_name
         attrs.pop('shortName', None)
         return attrs
@@ -55,20 +63,27 @@ class XodimRoliSerializer(serializers.ModelSerializer):
     name = serializers.CharField(required=False)
     role_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     roleId = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    huquqlar = serializers.JSONField(required=False, allow_null=True)
+    permissions = serializers.JSONField(source='huquqlar', required=False, allow_null=True)
 
     class Meta:
         model = XodimRoli
-        fields = ['id', 'biznes', 'nomi', 'name', 'role_id', 'roleId']
+        fields = ['id', 'biznes', 'nomi', 'name', 'role_id', 'roleId', 'huquqlar', 'permissions']
         read_only_fields = ['biznes']
 
     def validate(self, attrs):
         nomi = attrs.get('nomi') or attrs.get('name')
         if not nomi:
-            raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+            if self.instance and hasattr(self.instance, 'nomi'):
+                nomi = self.instance.nomi
+            else:
+                raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
         attrs['nomi'] = nomi
         attrs.pop('name', None)
 
         role_id = attrs.get('role_id') or attrs.get('roleId')
+        if role_id is None and self.instance and hasattr(self.instance, 'role_id'):
+            role_id = self.instance.role_id
         attrs['role_id'] = role_id
         attrs.pop('roleId', None)
         return attrs
@@ -158,6 +173,40 @@ class RolesViewSet(viewsets.ModelViewSet):
             queryset = XodimRoli.objects.filter(biznes=biznes).order_by('id')
             
         return queryset
+
+    def get_object(self):
+        user = self.request.user
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim')) else None
+        
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = self.kwargs[lookup_url_kwarg]
+        
+        # Ensure default roles exist if we are looking up by string and it's a default role name
+        if biznes and not str(lookup_value).isdigit() and lookup_value in ('admin', 'omborchi', 'sotuvchi'):
+            if not XodimRoli.objects.filter(biznes=biznes, role_id=lookup_value).exists():
+                defaults = [
+                    ("Administrator", "admin"),
+                    ("Omborchi", "omborchi"),
+                    ("Sotuvchi", "sotuvchi")
+                ]
+                roles_to_create = []
+                for nomi, rid in defaults:
+                    if not XodimRoli.objects.filter(biznes=biznes, role_id=rid).exists():
+                        roles_to_create.append(XodimRoli(biznes=biznes, nomi=nomi, role_id=rid))
+                if roles_to_create:
+                    XodimRoli.objects.bulk_create(roles_to_create)
+
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        from django.shortcuts import get_object_or_404
+        if str(lookup_value).isdigit():
+            filter_kwargs = {self.lookup_field: lookup_value}
+        else:
+            filter_kwargs = {'role_id': lookup_value}
+            
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     def perform_create(self, serializer):
         serializer.save(biznes=self.request.user.xodim.biznes)

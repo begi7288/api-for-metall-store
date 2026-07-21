@@ -223,6 +223,7 @@ class XodimRoli(BaseModel):
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='xodim_rollari', null=True, blank=True)
     nomi = models.CharField(max_length=255)
     role_id = models.CharField(max_length=50)
+    huquqlar = models.JSONField(default=dict, blank=True, null=True)
 
     def __str__(self):
         return self.nomi

@@ -605,6 +605,22 @@ class ExtraEndpointsAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['nomi'], "Updated Manager")
 
+        # 5. Patch using string role_id (e.g. sotuvchi) and permissions payload
+        perm_payload = {
+            "permissions": {
+                "dashboard": {"view": True, "create": False},
+                "sotuv": {"view": True, "create": True}
+            }
+        }
+        response = self.client.patch(reverse('roles-detail', kwargs={'pk': 'sotuvchi'}), perm_payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['permissions']['dashboard']['view'], True)
+
+        # 6. Retrieve using string role_id (e.g. sotuvchi)
+        response = self.client.get(reverse('roles-detail', kwargs={'pk': 'sotuvchi'}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['permissions']['sotuv']['create'], True)
+
         # 4. Delete (Destroy)
         response = self.client.delete(reverse('roles-detail', kwargs={'pk': role_id}))
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
