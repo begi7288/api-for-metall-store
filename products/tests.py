@@ -1865,6 +1865,16 @@ class TaminotchiAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("250000.00"))
 
+        # Test creating supplier when one field is empty string and the other is populated
+        payload_mixed = {
+            "nomi": "Taminotchi Mixed",
+            "oxirgi_qarz": "",
+            "jamiQarz": "400000.00"
+        }
+        response = self.client.post(self.list_url, payload_mixed, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("400000.00"))
+
 
 
 class CompleteSystemWorkflowTestCase(APITestCase):
