@@ -76,6 +76,27 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         from django.db.models import Sum
         return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('elementlar__miqdori'))['total'] or 0
 
+    def to_internal_value(self, data):
+        # Extract initial debt fields if they exist in the incoming request data
+        oxirgi_qarz = data.get('oxirgi_qarz') or data.get('oxirgiQarz')
+        jami_qarz = data.get('jami_qarz') or data.get('jamiQarz')
+        
+        target_val = oxirgi_qarz if oxirgi_qarz is not None else jami_qarz
+        
+        if target_val is not None and not data.get('dastlabki_qarz') and not data.get('dastlabkiQarz'):
+            if hasattr(data, 'copy'):
+                data = data.copy()
+            else:
+                data = dict(data)
+                
+            if isinstance(target_val, str):
+                target_val = target_val.replace(' ', '').replace(',', '').strip()
+                if not target_val:
+                    target_val = None
+            data['dastlabki_qarz'] = target_val
+            
+        return super().to_internal_value(data)
+
     def create(self, validated_data):
         dastlabki_qarz = validated_data.pop('dastlabki_qarz', None)
         dastlabki_qarz_camel = validated_data.pop('dastlabkiQarz', None)

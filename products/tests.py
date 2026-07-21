@@ -1847,6 +1847,24 @@ class TaminotchiAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("300000.00"))
 
+        # Test creating supplier with initial debt using oxirgi_qarz
+        payload_oxirgi = {
+            "nomi": "Taminotchi Oxirgi",
+            "oxirgi_qarz": "150000.00"
+        }
+        response = self.client.post(self.list_url, payload_oxirgi, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("150000.00"))
+
+        # Test creating supplier with initial debt using jamiQarz with spaces
+        payload_jami = {
+            "nomi": "Taminotchi Jami",
+            "jamiQarz": "250 000.00"
+        }
+        response = self.client.post(self.list_url, payload_jami, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("250000.00"))
+
 
 
 class CompleteSystemWorkflowTestCase(APITestCase):
