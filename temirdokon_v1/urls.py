@@ -19,7 +19,7 @@ from django.urls import path,include
 from django.conf.urls.static import static
 from django.conf import settings
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
-from user.extra_views import RolesListAPIView, UnitsListAPIView, CategoriesListAPIView, ArchiveListAPIView
+from user.extra_views import CategoriesViewSet, UnitsViewSet, RolesViewSet, ArchiveListAPIView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,10 +28,16 @@ urlpatterns = [
     path('products/order/', include('orders.urls')),
     path('products/', include('products.urls')),
     
-    # Missing root-level endpoints
-    path('roles/', RolesListAPIView.as_view(), name='roles-list'),
-    path('categories/', CategoriesListAPIView.as_view(), name='categories-list'),
-    path('units/', UnitsListAPIView.as_view(), name='units-list'),
+    # Missing root-level endpoints with full CRUD mapping
+    path('roles/', RolesViewSet.as_view({'get': 'list', 'post': 'create'}), name='roles-list'),
+    path('roles/<int:pk>/', RolesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='roles-detail'),
+    
+    path('categories/', CategoriesViewSet.as_view({'get': 'list', 'post': 'create'}), name='categories-list'),
+    path('categories/<int:pk>/', CategoriesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='categories-detail'),
+    
+    path('units/', UnitsViewSet.as_view({'get': 'list', 'post': 'create'}), name='units-list'),
+    path('units/<int:pk>/', UnitsViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='units-detail'),
+    
     path('archive/', ArchiveListAPIView.as_view(), name='archive-list'),
     
     # Swagger & Open API 3 Endpoints

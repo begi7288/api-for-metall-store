@@ -1101,3 +1101,20 @@ class YorliqShablon(BaseModel):
 
     def __str__(self):
         return f"Shablon: {self.nomi} ({self.eni}x{self.uzunlik} mm)"
+
+
+class MahsulotToifasi(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='toifalar', null=True, blank=True)
+    nomi = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.nomi
+
+
+class OlchovBirligi(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='olchov_birliklari', null=True, blank=True)
+    nomi = models.CharField(max_length=255)
+    short_name = models.CharField(max_length=50, blank=True, null=True)
+
+    def __str__(self):
+        return self.nomi

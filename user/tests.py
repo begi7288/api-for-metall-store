@@ -594,24 +594,59 @@ class ExtraEndpointsAPITestCase(APITestCase):
             kelish_narxi="1000.00", sotish_narxi="1500.00", toifa="Material", is_active=False
         )
 
-    def test_roles_endpoint(self):
+    def test_roles_endpoint_crud(self):
+        # 1. List (and auto-populate)
         response = self.client.get(reverse('roles-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 3)
-        self.assertEqual(response.data[0]['id'], 'admin')
+        self.assertEqual(response.data[0]['role_id'], 'admin')
 
-    def test_units_endpoint(self):
+        # 2. Post (Create)
+        response = self.client.post(reverse('roles-list'), {"nomi": "Super Manager", "role_id": "manager"})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        role_id = response.data['id']
+
+        # 3. Put (Update)
+        response = self.client.put(reverse('roles-detail', kwargs={'pk': role_id}), {"nomi": "Updated Manager", "role_id": "manager"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['nomi'], "Updated Manager")
+
+        # 4. Delete (Destroy)
+        response = self.client.delete(reverse('roles-detail', kwargs={'pk': role_id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_units_endpoint_crud(self):
+        # 1. List (and auto-populate)
         response = self.client.get(reverse('units-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 4)
-        self.assertEqual(response.data[0]['id'], 'kg')
+        self.assertEqual(response.data[0]['short_name'], 'kg')
 
-    def test_categories_endpoint(self):
+        # 2. Post
+        response = self.client.post(reverse('units-list'), {"nomi": "Tonna", "short_name": "t"})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        unit_id = response.data['id']
+
+        # 3. Delete
+        response = self.client.delete(reverse('units-detail', kwargs={'pk': unit_id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_categories_endpoint_crud(self):
+        # 1. List (and auto-populate from existing product categories)
         response = self.client.get(reverse('categories-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
         self.assertEqual(response.data[0]['nomi'], 'Material')
         self.assertEqual(response.data[1]['nomi'], 'Stroy')
+
+        # 2. Post
+        response = self.client.post(reverse('categories-list'), {"nomi": "Instrument"})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        cat_id = response.data['id']
+
+        # 3. Delete
+        response = self.client.delete(reverse('categories-detail', kwargs={'pk': cat_id}))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_archive_endpoint(self):
         response = self.client.get(reverse('archive-list'))

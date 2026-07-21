@@ -225,3 +225,12 @@ class Mijoz(BaseModel):
 
     def __str__(self):
         return f"{self.ism} {self.familiya}"
+
+
+class XodimRoli(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='xodim_rollari', null=True, blank=True)
+    nomi = models.CharField(max_length=255)
+    role_id = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.nomi
