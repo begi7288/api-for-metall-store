@@ -25,6 +25,9 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     tolovlar_summasi = serializers.SerializerMethodField()
     tovarlar_soni = serializers.SerializerMethodField()
 
+    dastlabki_qarz = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, write_only=True)
+    dastlabkiQarz = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, write_only=True)
+
     class Meta:
         model = Taminotchi
         fields = [
@@ -32,7 +35,8 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'boshliq_nomi', 'boshliqNomi', 'director', 'director_name', 'directorName', 'yuridik_nomi',
             'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
             'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'balans',
-            'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni'
+            'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni',
+            'dastlabki_qarz', 'dastlabkiQarz'
         ]
         read_only_fields = ['biznes']
 
@@ -66,4 +70,31 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     def get_tovarlar_soni(self, obj):
         from django.db.models import Sum
         return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('elementlar__miqdori'))['total'] or 0
+
+    def create(self, validated_data):
+        dastlabki_qarz = validated_data.pop('dastlabki_qarz', None)
+        dastlabki_qarz_camel = validated_data.pop('dastlabkiQarz', None)
+        
+        initial_debt = dastlabki_qarz or dastlabki_qarz_camel or Decimal('0.00')
+        
+        taminotchi = super().create(validated_data)
+        
+        if initial_debt > Decimal('0.00'):
+            from orders.models import SupplierOrder
+            from products.models import Dokon
+            from django.utils.timezone import now
+            
+            dokon = Dokon.objects.filter(biznes=taminotchi.biznes).first()
+            if dokon:
+                SupplierOrder.objects.create(
+                    biznes=taminotchi.biznes,
+                    taminotchi=taminotchi,
+                    dokon=dokon,
+                    nomi="Dastlabki qarz",
+                    holat='rasmiylashtirilgan',
+                    qabul_qilish_sanasi=now().date(),
+                    umumiy_summa=initial_debt,
+                    nasiya_summa=initial_debt
+                )
+        return taminotchi
 

@@ -1825,6 +1825,29 @@ class TaminotchiAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 0)
 
+    def test_supplier_initial_debt(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
+        
+        # Test creating supplier with initial debt using snake_case
+        payload = {
+            "nomi": "Taminotchi Snake",
+            "dastlabki_qarz": "500000.00"
+        }
+        response = self.client.post(self.list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("500000.00"))
+        self.assertEqual(Decimal(response.data["jami_qarz"]), Decimal("500000.00"))
+
+        # Test creating supplier with initial debt using camelCase
+        payload_camel = {
+            "nomi": "Taminotchi Camel",
+            "dastlabkiQarz": "300000.00"
+        }
+        response = self.client.post(self.list_url, payload_camel, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data["qarz_summasi"]), Decimal("300000.00"))
+
+
 
 class CompleteSystemWorkflowTestCase(APITestCase):
     """
