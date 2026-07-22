@@ -57,6 +57,29 @@ class Biznes(BaseModel):
     def __str__(self):
         return self.nomi
 
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        super().save(*args, **kwargs)
+        if is_new:
+            from products.models import OlchovBirligi
+            from user.models import XodimRoli
+            defaults_units = [
+                ("Kilogramm", "kg"),
+                ("Dona", "dona"),
+                ("Metr", "metr"),
+                ("Litr", "litr")
+            ]
+            for nomi, short_name in defaults_units:
+                OlchovBirligi.objects.get_or_create(biznes=self, short_name=short_name, defaults={'nomi': nomi})
+
+            defaults_roles = [
+                ("Administrator", "admin"),
+                ("Omborchi", "omborchi"),
+                ("Sotuvchi", "sotuvchi")
+            ]
+            for nomi, role_id in defaults_roles:
+                XodimRoli.objects.get_or_create(biznes=self, role_id=role_id, defaults={'nomi': nomi})
+
 
 class Xodim(BaseModel):
     ROL_CHOICES = (

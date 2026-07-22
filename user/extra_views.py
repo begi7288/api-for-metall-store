@@ -13,14 +13,16 @@ from products.serializers import MahsulotSerializer
 class MahsulotToifasiSerializer(serializers.ModelSerializer):
     nomi = serializers.CharField(required=False)
     name = serializers.CharField(required=False)
+    kategoriya = serializers.CharField(source='nomi', read_only=True)
+    category = serializers.CharField(source='nomi', read_only=True)
 
     class Meta:
         model = MahsulotToifasi
-        fields = ['id', 'biznes', 'nomi', 'name']
+        fields = ['id', 'biznes', 'nomi', 'name', 'kategoriya', 'category']
         read_only_fields = ['biznes']
 
     def validate(self, attrs):
-        nomi = attrs.get('nomi') or attrs.get('name')
+        nomi = attrs.get('nomi') or attrs.get('name') or self.initial_data.get('kategoriya') or self.initial_data.get('category')
         if not nomi:
             if self.instance and hasattr(self.instance, 'nomi'):
                 nomi = self.instance.nomi
@@ -123,7 +125,7 @@ class XodimRoliSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# ViewSets (with auto-population fallbacks)
+# ViewSets
 # ============================================================
 
 class CategoriesViewSet(viewsets.ModelViewSet):
@@ -137,16 +139,13 @@ class CategoriesViewSet(viewsets.ModelViewSet):
         
         biznes = user.xodim.biznes
         queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
-        
         if not queryset.exists():
             existing_cats = Mahsulot.objects.filter(biznes=biznes).exclude(toifa__isnull=True).exclude(toifa="").values_list('toifa', flat=True).distinct()
             cats_to_create = list(existing_cats)
-            if not cats_to_create:
-                cats_to_create = ["Sement", "Armatura", "Taxta"]
-            
-            toifalar = [MahsulotToifasi(biznes=biznes, nomi=cat) for cat in cats_to_create]
-            MahsulotToifasi.objects.bulk_create(toifalar)
-            queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
+            if cats_to_create:
+                toifalar = [MahsulotToifasi(biznes=biznes, nomi=cat) for cat in cats_to_create]
+                MahsulotToifasi.objects.bulk_create(toifalar)
+                queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
             
         return queryset
 
@@ -170,12 +169,11 @@ class UnitsViewSet(viewsets.ModelViewSet):
             ("Metr", "metr"),
             ("Litr", "litr")
         ]
-        for nomi, short_name in defaults:
-            if not OlchovBirligi.objects.filter(biznes=biznes, short_name=short_name).exists():
-                OlchovBirligi.objects.create(biznes=biznes, nomi=nomi, short_name=short_name)
-        
-        queryset = OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
-        return queryset
+        if not OlchovBirligi.objects.filter(biznes=biznes, short_name__in=['metr', 'litr']).exists() and OlchovBirligi.objects.filter(biznes=biznes).count() <= 2:
+            for nomi, short_name in defaults:
+                OlchovBirligi.objects.get_or_create(biznes=biznes, short_name=short_name, defaults={'nomi': nomi})
+
+        return OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
 
     def perform_create(self, serializer):
         serializer.save(biznes=self.request.user.xodim.biznes)
@@ -191,19 +189,7 @@ class RolesViewSet(viewsets.ModelViewSet):
             return XodimRoli.objects.none()
         
         biznes = user.xodim.biznes
-        queryset = XodimRoli.objects.filter(biznes=biznes).order_by('id')
-        
-        if not queryset.exists():
-            defaults = [
-                ("Administrator", "admin"),
-                ("Omborchi", "omborchi"),
-                ("Sotuvchi", "sotuvchi")
-            ]
-            roles = [XodimRoli(biznes=biznes, nomi=d[0], role_id=d[1]) for d in defaults]
-            XodimRoli.objects.bulk_create(roles)
-            queryset = XodimRoli.objects.filter(biznes=biznes).order_by('id')
-            
-        return queryset
+        return XodimRoli.objects.filter(biznes=biznes).order_by('id')
 
     def get_object(self):
         user = self.request.user
@@ -211,21 +197,6 @@ class RolesViewSet(viewsets.ModelViewSet):
         
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs[lookup_url_kwarg]
-        
-        # Ensure default roles exist if we are looking up by string and it's a default role name
-        if biznes and not str(lookup_value).isdigit() and lookup_value in ('admin', 'omborchi', 'sotuvchi'):
-            if not XodimRoli.objects.filter(biznes=biznes, role_id=lookup_value).exists():
-                defaults = [
-                    ("Administrator", "admin"),
-                    ("Omborchi", "omborchi"),
-                    ("Sotuvchi", "sotuvchi")
-                ]
-                roles_to_create = []
-                for nomi, rid in defaults:
-                    if not XodimRoli.objects.filter(biznes=biznes, role_id=rid).exists():
-                        roles_to_create.append(XodimRoli(biznes=biznes, nomi=nomi, role_id=rid))
-                if roles_to_create:
-                    XodimRoli.objects.bulk_create(roles_to_create)
 
         queryset = self.filter_queryset(self.get_queryset())
         

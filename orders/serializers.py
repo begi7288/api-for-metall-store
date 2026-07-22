@@ -46,6 +46,9 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         read_only_fields = ['biznes', 'balans', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
     def get_oxirgi_qarz(self, obj):
+        last_unpaid = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').filter(nasiya_summa__gt=0).order_by('-yaratilgan_vaqt').first()
+        if last_unpaid:
+            return last_unpaid.nasiya_summa
         last_order = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').order_by('-yaratilgan_vaqt').first()
         if last_order:
             return last_order.nasiya_summa
@@ -77,7 +80,6 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('elementlar__miqdori'))['total'] or 0
 
     def to_internal_value(self, data):
-        # Extract initial debt fields if they exist in the incoming request data
         def clean_val(val):
             if val is None:
                 return None
@@ -86,11 +88,8 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 if not val or val.lower() in ('null', 'undefined'):
                     return None
             try:
-                num = float(val)
-                if num == 0.0:
-                    return None
-                return val
-            except (ValueError, TypeError):
+                return str(Decimal(str(val)))
+            except Exception:
                 return None
 
         val_oxirgi = clean_val(data.get('oxirgi_qarz') or data.get('oxirgiQarz'))
@@ -132,6 +131,42 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                     umumiy_summa=initial_debt,
                     nasiya_summa=initial_debt
                 )
+        return taminotchi
+
+    def update(self, instance, validated_data):
+        dastlabki_qarz = validated_data.pop('dastlabki_qarz', None)
+        dastlabki_qarz_camel = validated_data.pop('dastlabkiQarz', None)
+        initial_debt = dastlabki_qarz or dastlabki_qarz_camel
+        
+        taminotchi = super().update(instance, validated_data)
+        
+        if initial_debt is not None:
+            try:
+                initial_debt_decimal = Decimal(str(initial_debt))
+            except Exception:
+                initial_debt_decimal = Decimal('0.00')
+            from orders.models import SupplierOrder
+            from products.models import Dokon
+            from django.utils.timezone import now
+            
+            dastlabki_order = instance.xarid_buyurtmalari.filter(nomi="Dastlabki qarz").first()
+            if dastlabki_order:
+                dastlabki_order.umumiy_summa = initial_debt_decimal
+                dastlabki_order.nasiya_summa = max(Decimal('0.00'), initial_debt_decimal - dastlabki_order.tolangan_summa)
+                dastlabki_order.save()
+            elif initial_debt_decimal > Decimal('0.00'):
+                dokon = Dokon.objects.filter(biznes=taminotchi.biznes).first()
+                if dokon:
+                    SupplierOrder.objects.create(
+                        biznes=taminotchi.biznes,
+                        taminotchi=taminotchi,
+                        dokon=dokon,
+                        nomi="Dastlabki qarz",
+                        holat='rasmiylashtirilgan',
+                        qabul_qilish_sanasi=now().date(),
+                        umumiy_summa=initial_debt_decimal,
+                        nasiya_summa=initial_debt_decimal
+                    )
         return taminotchi
 
 class SupplierOrderPaymentSerializer(serializers.ModelSerializer):

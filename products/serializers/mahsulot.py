@@ -216,6 +216,14 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                     mutable_data[key] = data.get(key)
             data = mutable_data
 
+        kat_val = data.get('kategoriya') or data.get('category') or data.get('kategoriya_nomi') or data.get('toifa_nomi') or data.get('category_name')
+        if kat_val and not data.get('toifa'):
+            if hasattr(data, 'copy'):
+                data = data.copy()
+            else:
+                data = dict(data)
+            data['toifa'] = kat_val
+
         if 'qoldiqlar' in data:
             import json
             val = data['qoldiqlar']
@@ -355,6 +363,11 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         representation['olchov_birligi'] = instance.olchov_birligi.short_name if instance.olchov_birligi else ""
+        representation['kategoriya'] = instance.toifa or "Mavjud emas"
+        representation['category'] = instance.toifa or "Mavjud emas"
+        representation['kategoriya_nomi'] = instance.toifa or "Mavjud emas"
+        representation['category_name'] = instance.toifa or "Mavjud emas"
+        representation['toifa_nomi'] = instance.toifa or "Mavjud emas"
         representation['rasm'] = MahsulotRasmSerializer(
             instance.rasmlar.all(),
             many=True,
