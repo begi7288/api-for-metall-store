@@ -93,7 +93,7 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 return None
 
         val_oxirgi = clean_val(data.get('oxirgi_qarz') or data.get('oxirgiQarz'))
-        val_jami = clean_val(data.get('jami_qarz') or data.get('jamiQarz'))
+        val_jami = clean_val(data.get('jami_qarz') or data.get('jamiQarz') or data.get('qarz_summasi') or data.get('qarzSummasi'))
         
         target_val = val_oxirgi or val_jami
         
@@ -119,7 +119,10 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             from products.models import Dokon
             from django.utils.timezone import now
             
-            dokon = Dokon.objects.filter(biznes=taminotchi.biznes).first()
+            dokon = Dokon.objects.filter(biznes=taminotchi.biznes).first() if taminotchi.biznes else None
+            if not dokon and taminotchi.biznes:
+                dokon = Dokon.objects.create(biznes=taminotchi.biznes, nomi="Asosiy do'kon")
+            
             if dokon:
                 SupplierOrder.objects.create(
                     biznes=taminotchi.biznes,
@@ -131,6 +134,7 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                     umumiy_summa=initial_debt,
                     nasiya_summa=initial_debt
                 )
+            taminotchi.refresh_from_db()
         return taminotchi
 
     def update(self, instance, validated_data):
@@ -155,7 +159,9 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 dastlabki_order.nasiya_summa = max(Decimal('0.00'), initial_debt_decimal - dastlabki_order.tolangan_summa)
                 dastlabki_order.save()
             elif initial_debt_decimal > Decimal('0.00'):
-                dokon = Dokon.objects.filter(biznes=taminotchi.biznes).first()
+                dokon = Dokon.objects.filter(biznes=taminotchi.biznes).first() if taminotchi.biznes else None
+                if not dokon and taminotchi.biznes:
+                    dokon = Dokon.objects.create(biznes=taminotchi.biznes, nomi="Asosiy do'kon")
                 if dokon:
                     SupplierOrder.objects.create(
                         biznes=taminotchi.biznes,
@@ -167,6 +173,7 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                         umumiy_summa=initial_debt_decimal,
                         nasiya_summa=initial_debt_decimal
                     )
+            taminotchi.refresh_from_db()
         return taminotchi
 
 class SupplierOrderPaymentSerializer(serializers.ModelSerializer):
