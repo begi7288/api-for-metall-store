@@ -163,20 +163,14 @@ class UnitsViewSet(viewsets.ModelViewSet):
             return OlchovBirligi.objects.none()
         
         biznes = user.xodim.biznes
-        defaults = [
-            ("Kilogramm", "kg"),
-            ("Dona", "dona"),
-            ("Metr", "metr"),
-            ("Litr", "litr")
-        ]
-        if not OlchovBirligi.objects.filter(biznes=biznes, short_name__in=['metr', 'litr']).exists() and OlchovBirligi.objects.filter(biznes=biznes).count() <= 2:
-            for nomi, short_name in defaults:
-                OlchovBirligi.objects.get_or_create(biznes=biznes, short_name=short_name, defaults={'nomi': nomi})
-
         return OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
 
     def perform_create(self, serializer):
         serializer.save(biznes=self.request.user.xodim.biznes)
+
+    def perform_destroy(self, instance):
+        instance.mahsulotlar.update(olchov_birligi=None)
+        instance.delete()
 
 
 class RolesViewSet(viewsets.ModelViewSet):

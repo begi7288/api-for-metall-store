@@ -51,7 +51,7 @@ class Characteristic(BaseModel):
 class Mahsulot(BaseModel):
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='mahsulotlar', null=True, blank=True)
     nomi = models.CharField(max_length=255)
-    olchov_birligi = models.ForeignKey('OlchovBirligi', on_delete=models.PROTECT, related_name='mahsulotlar', null=True, blank=True)
+    olchov_birligi = models.ForeignKey('OlchovBirligi', on_delete=models.SET_NULL, related_name='mahsulotlar', null=True, blank=True)
     kelish_narxi = models.DecimalField(max_digits=12, decimal_places=2)
     ustama = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, validators=[MinValueValidator(0.00), MaxValueValidator(100.00)])
     sotish_narxi = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
