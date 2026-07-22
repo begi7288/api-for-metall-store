@@ -563,6 +563,26 @@ class ImportAPITestCase(APITestCase):
         self.assertTrue(product.characteristics.filter(name="Brend", value="Quvasoy").exists())
         self.assertTrue(product.characteristics.filter(name="Qalinligi", value="1.5mm").exists())
 
+    def test_import_manual_elements_with_mahsulot_id(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin_token)
+        prod = Mahsulot.objects.create(biznes=self.biznes, nomi="Lom", kelish_narxi="10000.00", sotish_narxi="15000.00")
+        payload = {
+            "nomi": "Manual Kirim",
+            "dokon": self.dokon.id,
+            "import_turi": "kirim",
+            "elementlar": [
+                {
+                    "mahsulot": prod.id,
+                    "miqdori": "5.0",
+                    "kelish_narx": 12000.00
+                }
+            ]
+        }
+        response = self.client.post(self.import_list_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['holat'], 'yakunlangan')
+        self.assertEqual(response.data['miqdori'], 5)
+
     def test_import_invalid_file_extension(self):
         self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin_token)
         from django.core.files.uploadedfile import SimpleUploadedFile
