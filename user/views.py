@@ -10,6 +10,8 @@ from .permissions import IsAdminOrOmborchi, IsEmployee
 
 from .throttling import PhoneRateThrottle, IPLoginRateThrottle, PasswordChangeRateThrottle, RegisterRateThrottle
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import SessionAuthentication
+from .authentication import ExpiringTokenAuthentication
 import time
 
 
@@ -862,3 +864,45 @@ class IlovalarSettingsAPIView(APIView):
 
     def patch(self, request, *args, **kwargs):
         return self.post(request, *args, **kwargs)
+
+
+class ClearDatabaseAPIView(APIView):
+    authentication_classes = [
+        ExpiringTokenAuthentication,
+        SessionAuthentication
+    ]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return Response({"detail": "Faqat superuser ushbu amalni bajara oladi."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Delete non-superusers (related Xodim records cascade-delete automatically)
+        deleted_users, _ = User.objects.filter(is_superuser=False).delete()
+        
+        exclude_models = [
+            'User', 'Permission', 'ContentType', 'Session', 'Migration',
+            'Tarif'
+        ]
+
+        deleted_details = {}
+        from django.apps import apps
+        for model in apps.get_models():
+            model_name = model.__name__
+            if model_name in exclude_models:
+                continue
+            try:
+                count, _ = model.objects.all().delete()
+                if count > 0:
+                    deleted_details[model_name] = count
+            except Exception as e:
+                deleted_details[model_name] = f"Error: {str(e)}"
+
+        return Response({
+            "status": "Database successfully cleared.",
+            "deleted_non_superuser_accounts": deleted_users,
+            "deleted_records": deleted_details
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        return self.get(request, *args, **kwargs)

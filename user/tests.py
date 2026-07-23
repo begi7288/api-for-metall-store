@@ -856,5 +856,42 @@ class ExtraEndpointsAPITestCase(APITestCase):
         self.assertEqual(res_integ_toggle.status_code, status.HTTP_200_OK)
 
 
+class ClearDatabaseAPITestCase(APITestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from user.models import Biznes, Xodim, Tarif
+        from rest_framework.authtoken.models import Token
+
+        self.superuser = User.objects.create_superuser('super_admin', 'super@test.com', 'pass123')
+        self.super_token = Token.objects.create(user=self.superuser).key
+
+        self.tarif = Tarif.objects.create(nomi="Standard")
+        self.biznes = Biznes.objects.create(nomi="Clear Test Biznes", tarif=self.tarif)
+        self.regular_user = User.objects.create_user('regular', 'reg@test.com', 'pass123')
+        self.xodim = Xodim.objects.create(
+            user=self.regular_user, ism="Regular", familiya="User", telefon_raqam="+998909999999",
+            parol="pass123", jinsi="erkak", biznes=self.biznes, rol="admin"
+        )
+        self.reg_token = Token.objects.create(user=self.regular_user).key
+
+    def test_only_superuser_can_clear_database(self):
+        url = reverse('clear-database')
+        
+        # Test regular user forbidden (403)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.reg_token}')
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Test superuser succeeds (200)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.super_token}')
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Verify regular user was deleted, but superuser is kept
+        from django.contrib.auth.models import User
+        self.assertFalse(User.objects.filter(username='regular').exists())
+        self.assertTrue(User.objects.filter(username='super_admin').exists())
+
+
 
 

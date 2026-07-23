@@ -4,7 +4,7 @@ from .views import (
     XodimViewSet, MijozViewSet, LoginAPIView, LogoutAPIView, MeAPIView, ChangePasswordAPIView, RegisterAPIView,
     BiznesViewSet, TarifViewSet, BiznesSettingsAPIView, TarifSettingsAPIView, ChekSettingsAPIView,
     ValyutaSettingsAPIView, TolovTuriSettingsAPIView, MahsulotSettingsAPIView, BildirishnomaSettingsAPIView,
-    IlovalarSettingsAPIView
+    IlovalarSettingsAPIView, ClearDatabaseAPIView
 )
 from user.extra_views import RolesViewSet, CategoriesViewSet, UnitsViewSet
 from products.views.taminotchi import TaminotchiViewSet
@@ -58,5 +58,6 @@ urlpatterns = [
     path('credits/', include('user.credits_urls')),
     path('loyalty/', include('user.loyalty_urls')),
     path('sodiqlik/', include('user.loyalty_urls')),
+    path('clear-database/', ClearDatabaseAPIView.as_view(), name='clear-database'),
     path('', include(router.urls)),
 ]
