@@ -2429,5 +2429,61 @@ class CompleteSystemWorkflowTestCase(APITestCase):
         self.assertEqual(res_kirim.status_code, status.HTTP_200_OK)
 
 
+class OmborgaKirimAPITestCase(APITestCase):
+    def setUp(self):
+        from user.models import Biznes, Xodim, Tarif
+        from products.models import Dokon, Taminotchi, Mahsulot
+        from rest_framework.authtoken.models import Token
+        from django.contrib.auth.models import User
+
+        self.tarif = Tarif.objects.create(nomi="Kirim Tarif")
+        self.biznes = Biznes.objects.create(nomi="Kirim Biznes", egasi_ism="Owner", tarif=self.tarif)
+        self.user = User.objects.create_user(username="kirimuser", password="pass123")
+        self.xodim = Xodim.objects.create(
+            user=self.user, ism="Kirim", familiya="Admin", telefon_raqam="+998901112233",
+            parol="pass123", jinsi="erkak", biznes=self.biznes, rol="admin"
+        )
+        self.token = Token.objects.create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token.key)
+
+        self.dokon = Dokon.objects.create(biznes=self.biznes, nomi="Ombor Kirim")
+        self.taminotchi = Taminotchi.objects.create(biznes=self.biznes, nomi="Laboris tenetur labo")
+
+    def test_manual_omborga_kirim_creation_and_confirm(self):
+        payload = {
+            "nomi": "Omborga kirim test",
+            "dokon": self.dokon.id,
+            "taminotchi": self.taminotchi.id,
+            "tolov_turi": "nasiya",
+            "elementlar": [
+                {
+                    "nomi": "Nobis voluptatem arc",
+                    "toifa": "Metallar",
+                    "olchov_birligi": "kg",
+                    "kelish_narxi": "13232.00",
+                    "sotish_narxi": "15000.00",
+                    "miqdori": 32
+                }
+            ]
+        }
+        res = self.client.post(reverse('kirim-list'), payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['holat'], 'yakunlangan')
+        self.assertEqual(res.data['miqdori'], 32)
+        self.assertEqual(float(res.data['kelish_summasi']), 423424.0)
+
+        # Check stock created
+        from products.models import Mahsulot, DokonQoldiq
+        prod = Mahsulot.objects.get(biznes=self.biznes, nomi="Nobis voluptatem arc")
+        self.assertEqual(prod.miqdori, 32)
+
+        # Check stats endpoint
+        res_stats = self.client.get(reverse('kirim-stats'))
+        self.assertEqual(res_stats.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_stats.data['cheklar'], 1)
+        self.assertEqual(res_stats.data['soni'], 32)
+
+
+
 
 

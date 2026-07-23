@@ -9,6 +9,7 @@ from .mahsulot import (
     YorliqShablonSerializer
 )
 from .import_ops import ImportSerializer
+from .kirim import KirimSerializer
 from .dokon import DokonSerializer
 from .transfer import TransferSerializer
 from .write_off import WriteOffSerializer

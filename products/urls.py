@@ -1,13 +1,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import MahsulotViewSet, ImportViewSet, DokonViewSet, TransferViewSet, CharacteristicViewSet, MahsulotRasmViewSet, MahsulotShtrixKodViewSet, WriteOffViewSet, XususiyatMaydoniViewSet, ToplamViewSet, YorliqShablonViewSet, TaminotchiViewSet
+from .views import MahsulotViewSet, ImportViewSet, KirimViewSet, DokonViewSet, TransferViewSet, CharacteristicViewSet, MahsulotRasmViewSet, MahsulotShtrixKodViewSet, WriteOffViewSet, XususiyatMaydoniViewSet, ToplamViewSet, YorliqShablonViewSet, TaminotchiViewSet
 from user.extra_views import UnitsViewSet, CategoriesViewSet, ArchiveListAPIView
 
 router = DefaultRouter()
 router.register('dokon', DokonViewSet, basename='dokon')
 router.register('import', ImportViewSet, basename='import')
-router.register('kirim', ImportViewSet, basename='kirim')
-router.register('kirimlar', ImportViewSet, basename='kirimlar')
+router.register('kirim', KirimViewSet, basename='kirim')
+router.register('kirimlar', KirimViewSet, basename='kirimlar')
 router.register('transfer', TransferViewSet, basename='transfer')
 router.register('write-off', WriteOffViewSet, basename='write-off')
 router.register('hisobdan-chiqarish', WriteOffViewSet, basename='hisobdan-chiqarish')

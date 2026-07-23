@@ -1,5 +1,6 @@
 from .mahsulot import MahsulotViewSet, CharacteristicViewSet, MahsulotRasmViewSet, MahsulotShtrixKodViewSet, YorliqShablonViewSet, XususiyatMaydoniViewSet, ToplamViewSet
 from .import_ops import ImportViewSet
+from .kirim import KirimViewSet
 from .dokon import DokonViewSet
 from .transfer import TransferViewSet
 from .write_off import WriteOffViewSet
