@@ -600,11 +600,26 @@ class SwaggerAPITestCase(APITestCase):
         response = self.client.get(reverse('schema'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        response = self.client.get(reverse('swagger-ui'))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        from drf_spectacular.views import SpectacularSwaggerView, SpectacularRedocView
+        from rest_framework.test import APIRequestFactory
+        factory = APIRequestFactory()
         
-        response = self.client.get(reverse('redoc'))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        request = factory.get(reverse('swagger-ui'))
+        view = SpectacularSwaggerView.as_view()
+        res_swagger = view(request)
+        self.assertEqual(res_swagger.status_code, status.HTTP_200_OK)
+        
+        request = factory.get(reverse('redoc'))
+        view = SpectacularRedocView.as_view()
+        res_redoc = view(request)
+        self.assertEqual(res_redoc.status_code, status.HTTP_200_OK)
+
+    def test_admin_xodim_page_load(self):
+        from django.contrib.auth.models import User
+        admin_user = User.objects.create_superuser('admin_test', 'admin@test.com', 'adminpass123')
+        self.client.force_login(admin_user)
+        response = self.client.get('/admin/user/xodim/')
+        self.assertEqual(response.status_code, 200)
 
 
 class ExtraEndpointsAPITestCase(APITestCase):

@@ -10,6 +10,42 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+# Python 3.14 compatibility patch for Django template context copying
+try:
+    import django.template.context
+    import copy
+
+    def _fixed_base_context_copy(self):
+        duplicate = object.__new__(self.__class__)
+        duplicate.dicts = [d.copy() if hasattr(d, 'copy') else d for d in self.dicts]
+        return duplicate
+
+    def _fixed_context_copy(self):
+        duplicate = _fixed_base_context_copy(self)
+        duplicate.autoescape = getattr(self, 'autoescape', True)
+        duplicate.use_l10n = getattr(self, 'use_l10n', None)
+        duplicate.use_tz = getattr(self, 'use_tz', None)
+        duplicate.template_name = getattr(self, 'template_name', None)
+        duplicate.template = getattr(self, 'template', None)
+        if hasattr(self, 'render_context'):
+            duplicate.render_context = copy.copy(self.render_context)
+        return duplicate
+
+    def _fixed_request_context_copy(self):
+        duplicate = _fixed_context_copy(self)
+        duplicate.request = getattr(self, 'request', None)
+        duplicate._processors = getattr(self, '_processors', None)
+        duplicate._processors_index = getattr(self, '_processors_index', None)
+        return duplicate
+
+    django.template.context.BaseContext.__copy__ = _fixed_base_context_copy
+    django.template.context.Context.__copy__ = _fixed_context_copy
+    django.template.context.RequestContext.__copy__ = _fixed_request_context_copy
+    if hasattr(django.template.context, 'RenderContext'):
+        django.template.context.RenderContext.__copy__ = _fixed_base_context_copy
+except Exception:
+    pass
+
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -161,6 +197,9 @@ STORAGES = {
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Default primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ============================================================
 # CORS configuration (CRIT-4: whitelist, not allow-all)

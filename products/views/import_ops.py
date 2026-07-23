@@ -83,6 +83,12 @@ class ImportViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
         import_obj = self.get_object()
+        if import_obj.holat == 'yakunlangan':
+            return Response({
+                'status': "Import allaqachon yakunlangan.",
+                'holat': import_obj.holat
+            }, status=status.HTTP_200_OK)
+
         executor_xodim = None
         if request.user and hasattr(request.user, 'xodim'):
             executor_xodim = request.user.xodim

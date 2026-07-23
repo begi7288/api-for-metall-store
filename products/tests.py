@@ -1435,6 +1435,13 @@ class ImportAPITestCase(APITestCase):
         char = product.characteristics.filter(name="Qalinligi", value="5mm").first()
         self.assertIsNotNone(char)
 
+        # Confirming already completed import should return HTTP 200 OK idempotently
+        import_id = response.data['id']
+        confirm_url = reverse('import-confirm', kwargs={'pk': import_id})
+        conf_res = self.client.post(confirm_url)
+        self.assertEqual(conf_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(conf_res.data['holat'], 'yakunlangan')
+
 
 class BulkOperationsAPITestCase(APITestCase):
     def setUp(self):
