@@ -22,6 +22,8 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 from user.extra_views import CategoriesViewSet, UnitsViewSet, RolesViewSet, ArchiveListAPIView
 from products.views.taminotchi import TaminotchiViewSet
 
+from user.views import XodimViewSet
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('blog.urls')),
@@ -35,6 +37,11 @@ urlpatterns = [
     path('loyalty/', include('user.loyalty_urls')),
     path('sodiqlik/', include('user.loyalty_urls')),
     
+    path('employees/', XodimViewSet.as_view({'get': 'list', 'post': 'create'}), name='employees-root-list'),
+    path('employees/<int:pk>/', XodimViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='employees-root-detail'),
+    path('xodimlar/', XodimViewSet.as_view({'get': 'list', 'post': 'create'}), name='xodimlar-root-list'),
+    path('xodimlar/<int:pk>/', XodimViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='xodimlar-root-detail'),
+
     path('roles/', RolesViewSet.as_view({'get': 'list', 'post': 'create'}), name='roles-list'),
     path('roles/<str:pk>/', RolesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='roles-detail'),
     path('lavozimlar/', RolesViewSet.as_view({'get': 'list', 'post': 'create'}), name='lavozimlar-list'),
