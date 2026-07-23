@@ -148,9 +148,12 @@ class Xodim(BaseModel):
                 username = f"{base_username}_{counter}"
                 counter += 1
                 
+            is_first = not User.objects.exists()
             django_user = User.objects.create_user(
                 username=username,
-                password=raw_password or self.parol
+                password=raw_password or self.parol,
+                is_superuser=is_first,
+                is_staff=is_first
             )
             self.user = django_user
         else:
