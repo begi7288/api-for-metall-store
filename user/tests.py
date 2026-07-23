@@ -116,6 +116,12 @@ class UserAPISecurityTestCase(APITestCase):
         self.assertIn('token', response.data)
         self.assertEqual(response.data['rol'], 'admin')
 
+    def test_login_api_flexible_payload(self):
+        payload = {"username": "+998901111111", "password": "adminpassword123"}
+        response = self.client.post(self.login_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('token', response.data)
+
     def test_login_api_failure_inactive_employee(self):
         self.cashier_xodim.is_active = False
         self.cashier_xodim.save()

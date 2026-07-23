@@ -214,12 +214,27 @@ class ChangePasswordSerializer(serializers.Serializer):
         return attrs
 
 class LoginSerializer(serializers.Serializer):
-    telefon_raqam = serializers.CharField(required=True, label="Telefon raqami")
+    telefon_raqam = serializers.CharField(required=False, label="Telefon raqami")
     parol = serializers.CharField(
         required=True,
         style={'input_type': 'password'},
         label="Parol"
     )
+
+    def to_internal_value(self, data):
+        data = data.copy() if isinstance(data, dict) else {}
+        if 'username' in data and 'telefon_raqam' not in data:
+            data['telefon_raqam'] = data['username']
+        elif 'login' in data and 'telefon_raqam' not in data:
+            data['telefon_raqam'] = data['login']
+
+        if 'password' in data and 'parol' not in data:
+            data['parol'] = data['password']
+            
+        ret = super().to_internal_value(data)
+        if not ret.get('telefon_raqam'):
+            raise serializers.ValidationError({'telefon_raqam': "Telefon raqami yoki login kiritilishi shart."})
+        return ret
 
 
 class LogoutSerializer(serializers.Serializer):
