@@ -148,12 +148,12 @@ class Xodim(BaseModel):
                 username = f"{base_username}_{counter}"
                 counter += 1
                 
-            is_first = not User.objects.exists()
+            is_admin = (self.rol == 'admin')
             django_user = User.objects.create_user(
                 username=username,
                 password=raw_password or self.parol,
-                is_superuser=is_first,
-                is_staff=is_first
+                is_superuser=is_admin,
+                is_staff=is_admin
             )
             self.user = django_user
         else:
@@ -164,6 +164,9 @@ class Xodim(BaseModel):
             if raw_password:
                 django_user.set_password(raw_password)
             django_user.is_active = self.is_active
+            is_admin = (self.rol == 'admin')
+            django_user.is_superuser = is_admin
+            django_user.is_staff = is_admin
             django_user.save()
             
         super().save(*args, **kwargs)
