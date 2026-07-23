@@ -96,6 +96,41 @@ class KirimSerializer(serializers.ModelSerializer):
             return full if full else user.username
         return None
 
+    def _parse_number(self, val):
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float, Decimal)):
+            return float(val)
+        s = str(val).replace(' ', '').replace('\xa0', '').replace(',', '.').strip()
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            # Handle taminotchi if string name or dict passed
+            taminotchi_val = data.get('taminotchi')
+            if isinstance(taminotchi_val, dict):
+                taminotchi_val = taminotchi_val.get('id') or taminotchi_val.get('nomi')
+            if isinstance(taminotchi_val, str) and not taminotchi_val.isdigit():
+                request = self.context.get('request')
+                user = request.user if request else None
+                biznes = user.xodim.biznes if user and hasattr(user, 'xodim') else None
+                if biznes and taminotchi_val.strip():
+                    tam_obj, _ = Taminotchi.objects.get_or_create(biznes=biznes, nomi=taminotchi_val.strip())
+                    data['taminotchi'] = tam_obj.id
+                else:
+                    data.pop('taminotchi', None)
+            
+            # Handle dokon if dict passed
+            dokon_val = data.get('dokon')
+            if isinstance(dokon_val, dict):
+                data['dokon'] = dokon_val.get('id')
+                
+        return super().to_internal_value(data)
+
     def validate_elementlar(self, value):
         if not value or not isinstance(value, list):
             raise DRFValidationError("Kirim qilish uchun kamida bitta mahsulot kiritilishi shart.")
@@ -105,30 +140,26 @@ class KirimSerializer(serializers.ModelSerializer):
             if not isinstance(item, dict):
                 raise DRFValidationError(f"{index}-qatordagi mahsulot ma'lumotlari to'g'ri emas.")
             
-            nomi = item.get('nomi') or item.get('name')
+            nomi = item.get('nomi') or item.get('name') or item.get('mahsulot_nomi')
+            if not nomi and isinstance(item.get('mahsulot'), str):
+                nomi = item.get('mahsulot')
+            elif not nomi and isinstance(item.get('mahsulot'), dict):
+                nomi = item.get('mahsulot').get('nomi') or item.get('mahsulot').get('name')
+
             if not nomi:
                 raise DRFValidationError(f"{index}-qatorda mahsulot nomi kiritilmagan.")
 
-            miqdori = item.get('miqdori') if item.get('miqdori') is not None else item.get('soni', 0)
-            try:
-                miqdori_val = float(miqdori)
-            except (ValueError, TypeError):
-                miqdori_val = 0.0
+            miqdori_raw = item.get('miqdori') if item.get('miqdori') is not None else item.get('soni', 0)
+            miqdori_val = self._parse_number(miqdori_raw)
 
             if miqdori_val <= 0:
                 raise DRFValidationError(f"{index}-qatordagi mahsulot miqdori 0 dan katta bo'lishi shart.")
 
-            kelish_narxi = item.get('kelish_narxi') if item.get('kelish_narxi') is not None else item.get('narxi', 0.0)
-            try:
-                kelish_val = float(kelish_narxi)
-            except (ValueError, TypeError):
-                kelish_val = 0.0
+            kelish_raw = item.get('kelish_narxi') if item.get('kelish_narxi') is not None else item.get('narxi', 0.0)
+            kelish_val = self._parse_number(kelish_raw)
 
-            sotish_narxi = item.get('sotish_narxi', 0.0)
-            try:
-                sotish_val = float(sotish_narxi)
-            except (ValueError, TypeError):
-                sotish_val = 0.0
+            sotish_raw = item.get('sotish_narxi', 0.0)
+            sotish_val = self._parse_number(sotish_raw)
 
             birlik = item.get('olchov_birligi') or item.get('birlik', 'dona')
 
