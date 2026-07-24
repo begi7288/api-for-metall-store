@@ -6,6 +6,45 @@ from .models import (
     XususiyatMaydoni, YorliqShablon
 )
 
+@admin.register(Dokon)
+class DokonAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'yaratilgan_vaqt')
+    search_fields = ('nomi',)
+
+@admin.register(Mahsulot)
+class MahsulotAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'kelish_narxi', 'sotish_narxi', 'miqdori', 'is_active', 'yaratilgan_vaqt')
+    search_fields = ('nomi', 'brend', 'toifa')
+    list_filter = ('is_active', 'biznes')
+
+@admin.register(Import)
+class ImportAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'dokon', 'holat', 'import_turi', 'miqdori', 'yaratilgan_vaqt')
+    list_filter = ('holat', 'import_turi', 'biznes')
+    search_fields = ('nomi',)
+
+@admin.register(Transfer)
+class TransferAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'dokondan', 'dokonga', 'holat', 'miqdori', 'summa', 'yaratilgan_vaqt')
+    list_filter = ('holat', 'biznes')
+    search_fields = ('nomi',)
+
+@admin.register(Characteristic)
+class CharacteristicAdmin(admin.ModelAdmin):
+    list_display = ('id', 'mahsulot', 'name', 'value')
+    search_fields = ('name', 'value', 'mahsulot__nomi')
+
+@admin.register(Taminotchi)
+class TaminotchiAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'telefon_raqam', 'balans', 'yaratilgan_vaqt')
+    search_fields = ('nomi', 'telefon_raqam')
+
+@admin.register(WriteOff)
+class WriteOffAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'dokon', 'sababi', 'holat', 'miqdori', 'kelish_summasi', 'yaratilgan_vaqt')
+    list_filter = ('sababi', 'holat', 'biznes')
+    search_fields = ('nomi',)
+
 @admin.register(OlchovBirligi)
 class OlchovBirligiAdmin(admin.ModelAdmin):
     list_display = ('id', 'nomi', 'short_name', 'biznes', 'yaratilgan_vaqt')
