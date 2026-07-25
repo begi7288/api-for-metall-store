@@ -192,6 +192,10 @@ class SupplierOrderPaymentSerializer(serializers.ModelSerializer):
 class SupplierOrderItemSerializer(serializers.ModelSerializer):
     mahsulot_nomi = serializers.ReadOnlyField(source='mahsulot.nomi')
     shtrix_kod = serializers.SerializerMethodField()
+    kelish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    ustama = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    sotish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    ulgurji_narx = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
 
     class Meta:
         model = SupplierOrderItem
@@ -339,10 +343,10 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                     order=order,
                     mahsulot=mahsulot,
                     miqdori=item_data['miqdori'],
-                    kelish_narxi=item_data.get('kelish_narxi', mahsulot.kelish_narxi or Decimal('0.00')),
-                    ustama=item_data.get('ustama', mahsulot.ustama or Decimal('0.00')),
-                    sotish_narxi=item_data.get('sotish_narxi', mahsulot.sotish_narxi or Decimal('0.00')),
-                    ulgurji_narx=item_data.get('ulgurji_narx', mahsulot.ulgurji_narx or Decimal('0.00'))
+                    kelish_narxi=item_data.get('kelish_narxi') or mahsulot.kelish_narxi or Decimal('0.00'),
+                    ustama=item_data.get('ustama') or mahsulot.ustama or Decimal('0.00'),
+                    sotish_narxi=item_data.get('sotish_narxi') or mahsulot.sotish_narxi or Decimal('0.00'),
+                    ulgurji_narx=item_data.get('ulgurji_narx') or mahsulot.ulgurji_narx or Decimal('0.00')
                 )
 
         return order
@@ -376,10 +380,10 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                     order=instance,
                     mahsulot=mahsulot,
                     miqdori=item_data['miqdori'],
-                    kelish_narxi=item_data.get('kelish_narxi', mahsulot.kelish_narxi or Decimal('0.00')),
-                    ustama=item_data.get('ustama', mahsulot.ustama or Decimal('0.00')),
-                    sotish_narxi=item_data.get('sotish_narxi', mahsulot.sotish_narxi or Decimal('0.00')),
-                    ulgurji_narx=item_data.get('ulgurji_narx', mahsulot.ulgurji_narx or Decimal('0.00'))
+                    kelish_narxi=item_data.get('kelish_narxi') or mahsulot.kelish_narxi or Decimal('0.00'),
+                    ustama=item_data.get('ustama') or mahsulot.ustama or Decimal('0.00'),
+                    sotish_narxi=item_data.get('sotish_narxi') or mahsulot.sotish_narxi or Decimal('0.00'),
+                    ulgurji_narx=item_data.get('ulgurji_narx') or mahsulot.ulgurji_narx or Decimal('0.00')
                 )
 
         return instance
