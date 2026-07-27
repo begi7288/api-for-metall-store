@@ -256,11 +256,28 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                 
         serializer.save(biznes=biznes)
 
+    @action(detail=False, methods=['post', 'patch', 'put'], url_path='bulk-update', permission_classes=[IsAdminOrOmborchi])
+    def bulk_update(self, request):
+        return self.bulk_operations(request)
+
     @action(detail=False, methods=['post'], permission_classes=[IsAdminOrOmborchi])
     def bulk_operations(self, request):
+        import json
         action_type = request.data.get('action')
         product_ids = request.data.get('product_ids', [])
         params = request.data.get('params', {})
+
+        if isinstance(product_ids, str):
+            try:
+                product_ids = json.loads(product_ids)
+            except json.JSONDecodeError:
+                pass
+
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                pass
 
         if not action_type:
             return Response({"detail": "Amal ('action') ko'rsatilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
@@ -292,6 +309,10 @@ class MahsulotViewSet(viewsets.ModelViewSet):
             soni_turi = params.get('soni_turi', 'qolda')
             dokon_id = params.get('dokon')
             nol_qoldiq_otkazish = params.get('nol_qoldiq_otkazish', False)
+            if isinstance(nol_qoldiq_otkazish, str):
+                nol_qoldiq_otkazish = nol_qoldiq_otkazish.lower() in ('true', '1', 'yes', 'y')
+            else:
+                nol_qoldiq_otkazish = bool(nol_qoldiq_otkazish)
 
             for p in queryset:
                 shtrix_kod = ""
@@ -359,7 +380,11 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                 return Response({"detail": "Kamida bitta o'zgartirish maydoni ('price_type' yoki 'erkin_narx') ko'rsatilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
 
             if erkin_narx is not None:
-                queryset.update(erkin_narx=bool(erkin_narx))
+                if isinstance(erkin_narx, str):
+                    erkin_narx_val = erkin_narx.lower() in ('true', '1', 'yes', 'y')
+                else:
+                    erkin_narx_val = bool(erkin_narx)
+                queryset.update(erkin_narx=erkin_narx_val)
 
             if price_type is not None:
                 if price_type not in ['kelish_narxi', 'sotish_narxi', 'ulgurji_narx']:
@@ -413,7 +438,12 @@ class MahsulotViewSet(viewsets.ModelViewSet):
             if archive is None:
                 return Response({"detail": "Arxivlash holati ('archive') ko'rsatilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
             
-            is_active_val = not bool(archive)
+            if isinstance(archive, str):
+                archive_bool = archive.lower() in ('true', '1', 'yes', 'y')
+            else:
+                archive_bool = bool(archive)
+            
+            is_active_val = not archive_bool
             queryset.update(is_active=is_active_val)
             return Response({"success": True, "message": "Mahsulotlar holati ommaviy o'zgartirildi."}, status=status.HTTP_200_OK)
 

@@ -406,4 +406,28 @@ class Ilova(BaseModel):
     status_text = models.CharField(max_length=100, blank=True, null=True)
 
     def __str__(self):
-        return f"{self.nomi} ({'Ulangan' if self.is_connected else 'Ulanmagan'})"
+        return f"{self.nomi} ({'Ulangan' if self.is_connected else 'Ulanmagan'})"
+
+
+class Guruh(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='mijoz_guruhlari', null=True, blank=True)
+    nomi = models.CharField(max_length=255)
+    chegirma_foizi = models.CharField(max_length=255, blank=True, null=True, default='0')
+    chegirma_qollash = models.CharField(max_length=255, blank=True, null=True)
+    holat = models.CharField(max_length=50, default='Faol')
+    tavsif = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return self.nomi
+
+
+class Teg(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='mijoz_teglari', null=True, blank=True)
+    nomi = models.CharField(max_length=255)
+    tur = models.CharField(max_length=50, default="Qo'lda")
+    holat = models.CharField(max_length=50, default='Faol')
+    tavsif = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return self.nomi
+

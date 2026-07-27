@@ -893,5 +893,157 @@ class ClearDatabaseAPITestCase(APITestCase):
         self.assertTrue(User.objects.filter(username='super_admin').exists())
 
 
+class GuruhAndTegAPITestCase(APITestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from user.models import Biznes, Xodim, Tarif, Guruh, Teg
+        from rest_framework.authtoken.models import Token
+
+        # Biznes 1
+        self.tarif = Tarif.objects.create(nomi="Standard test")
+        self.biznes1 = Biznes.objects.create(nomi="Biznes A test", tarif=self.tarif)
+        self.user1 = User.objects.create_user('user1_t', 'u1@test.com', 'pass123')
+        self.xodim1 = Xodim.objects.create(
+            user=self.user1, ism="Ali", familiya="Valiyev", telefon_raqam="+998901111111",
+            parol="pass123", jinsi="erkak", biznes=self.biznes1, rol="admin"
+        )
+        self.token1 = Token.objects.create(user=self.user1).key
+
+        # Biznes 2
+        self.biznes2 = Biznes.objects.create(nomi="Biznes B test", tarif=self.tarif)
+        self.user2 = User.objects.create_user('user2_t', 'u2@test.com', 'pass123')
+        self.xodim2 = Xodim.objects.create(
+            user=self.user2, ism="Vali", familiya="Aliev", telefon_raqam="+998902222222",
+            parol="pass123", jinsi="erkak", biznes=self.biznes2, rol="admin"
+        )
+        self.token2 = Token.objects.create(user=self.user2).key
+
+    def test_guruh_crud(self):
+        from django.urls import reverse
+        from user.models import Guruh
+
+        # 1. List (empty initially)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token1}')
+        url = reverse('groups-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        # 2. Create
+        payload = {
+            "nomi": "VIP",
+            "chegirma_foizi": "10.5",
+            "chegirma_qollash": "Faqat chakana narxlar",
+            "holat": "Faol",
+            "tavsif": "VIP mijozlar guruhi"
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['nomi'], "VIP")
+        self.assertEqual(response.data['chegirma_foizi'], "10.5")
+        self.assertEqual(response.data['chegirma_qollash'], "Faqat chakana narxlar")
+        self.assertEqual(response.data['holat'], "Faol")
+        self.assertEqual(response.data['tavsif'], "VIP mijozlar guruhi")
+        self.assertIn('yaratilgan_sana', response.data)
+        guruh_id = response.data['id']
+
+        # 3. Retrieve
+        detail_url = reverse('groups-detail', kwargs={'pk': guruh_id})
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['nomi'], "VIP")
+
+        # 4. Update
+        update_payload = {
+            "nomi": "VIP Updated",
+            "chegirma_foizi": 15,
+            "chegirma_qollash": "Barcha narxlar",
+            "holat": "Yopiq",
+            "tavsif": "Yangi tavsif"
+        }
+        response = self.client.put(detail_url, update_payload, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['nomi'], "VIP Updated")
+        self.assertEqual(response.data['chegirma_foizi'], "15")
+
+        # 5. Isolation: Biznes 2 user should not see Biznes 1's groups
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token2}')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        # Biznes 2 user should get 404 when trying to access Biznes 1's group
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 404)
+
+        # 6. Delete
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token1}')
+        response = self.client.delete(detail_url)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Guruh.objects.filter(id=guruh_id).exists())
+
+    def test_teg_crud(self):
+        from django.urls import reverse
+        from user.models import Teg
+
+        # 1. List (empty initially)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token1}')
+        url = reverse('tags-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        # 2. Create
+        payload = {
+            "nomi": "Ishonchli",
+            "tur": "Qo'lda",
+            "holat": "Faol",
+            "tavsif": "Ishonchli xaridorlar"
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['nomi'], "Ishonchli")
+        self.assertEqual(response.data['tur'], "Qo'lda")
+        self.assertEqual(response.data['holat'], "Faol")
+        self.assertEqual(response.data['tavsif'], "Ishonchli xaridorlar")
+        self.assertIn('yaratilgan_sana', response.data)
+        teg_id = response.data['id']
+
+        # 3. Retrieve
+        detail_url = reverse('tags-detail', kwargs={'pk': teg_id})
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['nomi'], "Ishonchli")
+
+        # 4. Update
+        update_payload = {
+            "nomi": "Ishonchli Yangilangan",
+            "tur": "Avto",
+            "holat": "Yopiq",
+            "tavsif": "Yangi tavsif teg"
+        }
+        response = self.client.put(detail_url, update_payload, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['nomi'], "Ishonchli Yangilangan")
+        self.assertEqual(response.data['tur'], "Avto")
+
+        # 5. Isolation: Biznes 2 user should not see Biznes 1's tags
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token2}')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        # Biznes 2 user should get 404 when trying to access Biznes 1's tag
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 404)
+
+        # 6. Delete
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token1}')
+        response = self.client.delete(detail_url)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Teg.objects.filter(id=teg_id).exists())
+
+
+
 
 

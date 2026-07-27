@@ -2,7 +2,7 @@ import html
 import re
 from rest_framework import serializers
 from django.core.exceptions import ValidationError
-from .models import Xodim, Mijoz, validate_password_strength, Biznes, Tarif
+from .models import Xodim, Mijoz, validate_password_strength, Biznes, Tarif, Guruh, Teg
 
 def sanitize_input(value):
     if not isinstance(value, str):
@@ -378,6 +378,32 @@ class TarifSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         model = Tarif
         fields = ['id', 'nomi', 'dokon_limiti', 'mahsulot_limiti', 'xodim_limiti', 'yaratilgan_vaqt', 'yangilangan_vaqt']
         read_only_fields = ['yaratilgan_vaqt', 'yangilangan_vaqt']
+
+
+class GuruhSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
+    chegirma_foizi = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0')
+    chegirma_qollash = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='')
+    holat = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='Faol')
+    tavsif = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='')
+    yaratilgan_sana = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
+
+    class Meta:
+        model = Guruh
+        fields = ['id', 'nomi', 'chegirma_foizi', 'chegirma_qollash', 'holat', 'tavsif', 'yaratilgan_sana']
+        read_only_fields = ['id', 'yaratilgan_sana']
+
+
+class TegSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
+    tur = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="Qo'lda")
+    holat = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='Faol')
+    tavsif = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='')
+    yaratilgan_sana = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
+
+    class Meta:
+        model = Teg
+        fields = ['id', 'nomi', 'tur', 'holat', 'tavsif', 'yaratilgan_sana']
+        read_only_fields = ['id', 'yaratilgan_sana']
+
 
 
 

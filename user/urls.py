@@ -4,7 +4,7 @@ from .views import (
     XodimViewSet, MijozViewSet, LoginAPIView, LogoutAPIView, MeAPIView, ChangePasswordAPIView, RegisterAPIView,
     BiznesViewSet, TarifViewSet, BiznesSettingsAPIView, TarifSettingsAPIView, ChekSettingsAPIView,
     ValyutaSettingsAPIView, TolovTuriSettingsAPIView, MahsulotSettingsAPIView, BildirishnomaSettingsAPIView,
-    IlovalarSettingsAPIView, ClearDatabaseAPIView
+    IlovalarSettingsAPIView, ClearDatabaseAPIView, GuruhViewSet, TegViewSet
 )
 from user.extra_views import RolesViewSet, CategoriesViewSet, UnitsViewSet
 from products.views.taminotchi import TaminotchiViewSet
@@ -15,6 +15,8 @@ router.register('tarif', TarifViewSet, basename='tarif')
 router.register('xodimlar', XodimViewSet, basename='xodim')
 router.register('employees', XodimViewSet, basename='employees')
 router.register('mijozlar', MijozViewSet, basename='mijoz')
+router.register('groups', GuruhViewSet, basename='groups')
+router.register('tags', TegViewSet, basename='tags')
 router.register('rollar', RolesViewSet, basename='rollar')
 router.register('roles', RolesViewSet, basename='roles')
 router.register('lavozimlar', RolesViewSet, basename='lavozimlar')

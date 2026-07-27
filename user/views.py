@@ -4,8 +4,8 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.hashers import check_password
 from django.shortcuts import redirect, render
-from .models import Xodim, Mijoz, Biznes, Tarif
-from .serializers import XodimSerializer, MijozSerializer, ChangePasswordSerializer, LoginSerializer, LogoutSerializer, RegisterSerializer, BiznesSerializer, TarifSerializer
+from .models import Xodim, Mijoz, Biznes, Tarif, Guruh, Teg
+from .serializers import XodimSerializer, MijozSerializer, ChangePasswordSerializer, LoginSerializer, LogoutSerializer, RegisterSerializer, BiznesSerializer, TarifSerializer, GuruhSerializer, TegSerializer
 from .permissions import IsAdminOrOmborchi, IsEmployee
 
 from .throttling import PhoneRateThrottle, IPLoginRateThrottle, PasswordChangeRateThrottle, RegisterRateThrottle
@@ -906,3 +906,38 @@ class ClearDatabaseAPIView(APIView):
 
     def post(self, request, *args, **kwargs):
         return self.get(request, *args, **kwargs)
+
+
+class GuruhViewSet(viewsets.ModelViewSet):
+    serializer_class = GuruhSerializer
+    permission_classes = [IsEmployee]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated or not hasattr(user, 'xodim') or not user.xodim.biznes:
+            return Guruh.objects.none()
+        return Guruh.objects.filter(biznes=user.xodim.biznes).order_by('-yaratilgan_vaqt')
+
+    def perform_create(self, serializer):
+        biznes = None
+        if self.request.user and hasattr(self.request.user, 'xodim'):
+            biznes = self.request.user.xodim.biznes
+        serializer.save(biznes=biznes)
+
+
+class TegViewSet(viewsets.ModelViewSet):
+    serializer_class = TegSerializer
+    permission_classes = [IsEmployee]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated or not hasattr(user, 'xodim') or not user.xodim.biznes:
+            return Teg.objects.none()
+        return Teg.objects.filter(biznes=user.xodim.biznes).order_by('-yaratilgan_vaqt')
+
+    def perform_create(self, serializer):
+        biznes = None
+        if self.request.user and hasattr(self.request.user, 'xodim'):
+            biznes = self.request.user.xodim.biznes
+        serializer.save(biznes=biznes)
+
