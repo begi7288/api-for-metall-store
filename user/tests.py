@@ -394,14 +394,14 @@ class MultiTenantSecurityTestCase(APITestCase):
     def test_customer_stats_and_filters(self):
         self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.admin1_token)
         
-        # 1. Create a customer with optional fields and tags/groups
+        # 1. Create a customer with optional fields and tags/groups (list format)
         payload = {
             "ism": "Ali",
             "telefon_raqam_1": "+998901112233",
             "jinsi": "erkak",
             "manzil": "Toshkent, Chilonzor",
-            "guruhlar": "VIP, Doimiy",
-            "teglar": "Ishonchli"
+            "guruhlar": ["VIP", "Doimiy"],
+            "teglar": ["Ishonchli"]
         }
         response = self.client.post(reverse('mijoz-list'), payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)

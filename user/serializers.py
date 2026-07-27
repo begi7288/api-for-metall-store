@@ -131,6 +131,31 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     guruhlar = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
     teglar = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
 
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'guruhlar' in data:
+            val = data['guruhlar']
+            if isinstance(val, list):
+                str_elements = []
+                for x in val:
+                    if isinstance(x, dict):
+                        str_elements.append(str(x.get('nomi') or x.get('name') or ''))
+                    else:
+                        str_elements.append(str(x))
+                data['guruhlar'] = ", ".join([s.strip() for s in str_elements if s.strip()])
+        if 'teglar' in data:
+            val = data['teglar']
+            if isinstance(val, list):
+                str_elements = []
+                for x in val:
+                    if isinstance(x, dict):
+                        str_elements.append(str(x.get('nomi') or x.get('name') or ''))
+                    else:
+                        str_elements.append(str(x))
+                data['teglar'] = ", ".join([s.strip() for s in str_elements if s.strip()])
+        return super().to_internal_value(data)
+
+
     xaridlar_summasi = serializers.SerializerMethodField(read_only=True)
     oxirgi_xarid = serializers.SerializerMethodField(read_only=True)
 
