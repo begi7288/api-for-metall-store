@@ -285,6 +285,147 @@ class RegisterAPIView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+class RegisterRequestAPIView(APIView):
+    authentication_classes = []
+    permission_classes = []
+    throttle_classes = [RegisterRateThrottle, IPLoginRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        from django.core.cache import cache
+        from user.telegram_bot import generate_random_password, send_telegram_message
+        
+        ism = request.data.get('ism')
+        telefon_raqam = request.data.get('telefon_raqam')
+        biznes_nomi = request.data.get('biznes_nomi')
+        parol = request.data.get('parol')
+        
+        if not ism or not telefon_raqam:
+            return Response({"detail": "Ism va telefon raqami kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if Xodim.objects.filter(telefon_raqam=telefon_raqam).exists():
+            return Response({"telefon_raqam": ["Ushbu telefon raqami allaqachon ro'yxatdan o'tkazilgan."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        import re
+        phone = telefon_raqam.strip().replace('+', '')
+        if not re.match(r"^\d{7,15}$", phone):
+            return Response({"telefon_raqam": ["Telefon raqami noto'g'ri formatda kiritildi."]}, status=status.HTTP_400_BAD_REQUEST)
+            
+        code = generate_random_password()
+        
+        cache_key = f"reg_request_{phone}"
+        cache_data = {
+            "ism": ism,
+            "telefon_raqam": telefon_raqam,
+            "biznes_nomi": biznes_nomi,
+            "parol": parol or code,
+            "code": code
+        }
+        cache.set(cache_key, cache_data, timeout=600)
+        
+        actual_biznes_nomi = biznes_nomi or f"{ism}ning Biznesi"
+        msg = (
+            f"<b>Yangi ro'yxatdan o'tish so'rovi:</b>\n"
+            f"👤 Ism: {ism}\n"
+            f"📞 Telefon: {telefon_raqam}\n"
+            f"🏢 Biznes: {actual_biznes_nomi}\n"
+            f"💬 Tasdiqlash kodi: <code>{code}</code>"
+        )
+        send_telegram_message(msg)
+        
+        return Response({
+            "status": "Verification code sent.",
+            "detail": "Tasdiqlash kodi yuborildi."
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyCEOAPIView(APIView):
+    authentication_classes = []
+    permission_classes = []
+    throttle_classes = [RegisterRateThrottle, IPLoginRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        from django.core.cache import cache
+        from django.db import transaction
+        from user.models import Biznes, Tarif
+        from products.models import Dokon
+        from rest_framework.authtoken.models import Token
+        from django.contrib.auth.models import User
+        
+        telefon_raqam = request.data.get('telefon_raqam')
+        kod = request.data.get('kod') or request.data.get('code')
+        
+        if not telefon_raqam or not kod:
+            return Response({"detail": "Telefon raqami va tasdiqlash kodi kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        phone = telefon_raqam.strip().replace('+', '')
+        cache_key = f"reg_request_{phone}"
+        cache_data = cache.get(cache_key)
+        
+        if not cache_data:
+            return Response({"detail": "Tasdiqlash kodi eskirgan yoki bunday so'rov mavjud emas."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if str(cache_data['code']) != str(kod).strip():
+            return Response({"detail": "Noto'g'ri tasdiqlash kodi."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        ism = cache_data['ism']
+        biznes_nomi = cache_data['biznes_nomi']
+        parol = cache_data['parol']
+        
+        if Xodim.objects.filter(telefon_raqam=telefon_raqam).exists():
+            return Response({"detail": "Ushbu telefon raqami allaqachon ro'yxatdan o'tkazilgan."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            with transaction.atomic():
+                if not biznes_nomi:
+                    biznes_nomi = f"{ism}ning Biznesi"
+                    
+                tarif = Tarif.objects.first()
+                if not tarif:
+                    tarif = Tarif.objects.create(nomi="Bepul tarif", dokon_limiti=2, mahsulot_limiti=100, xodim_limiti=3)
+                    
+                biznes = Biznes.objects.create(
+                    nomi=biznes_nomi,
+                    egasi_ism=ism,
+                    tarif=tarif
+                )
+                
+                Dokon.objects.create(
+                    biznes=biznes,
+                    nomi=f"{biznes_nomi} do'koni"
+                )
+                
+                from products.models import XususiyatMaydoni
+                XususiyatMaydoni.objects.create(biznes=biznes, nomi="Shtrix-kod", tur="matn")
+                XususiyatMaydoni.objects.create(biznes=biznes, nomi="Tovar nomi", tur="matn")
+                
+                xodim = Xodim.objects.create(
+                    biznes=biznes,
+                    ism=ism,
+                    telefon_raqam=telefon_raqam,
+                    parol=parol,
+                    is_active=True,
+                    rol='admin',
+                    familiya='Foydalanuvchi',
+                    jinsi='erkak'
+                )
+                
+            user_obj = User.objects.get(pk=xodim.user.pk)
+            token, created = Token.objects.get_or_create(user=user_obj)
+            
+            cache.delete(cache_key)
+            
+            return Response({
+                'token': token.key,
+                'ism': xodim.ism,
+                'familiya': xodim.familiya,
+                'rol': xodim.rol,
+                'redirect_url': '/users/me/'
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({"detail": f"Xatolik yuz berdi: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 class XodimViewSet(viewsets.ModelViewSet):
     serializer_class = XodimSerializer

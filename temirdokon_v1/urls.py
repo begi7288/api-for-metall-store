@@ -22,9 +22,11 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 from user.extra_views import CategoriesViewSet, UnitsViewSet, RolesViewSet, ArchiveListAPIView
 from products.views.taminotchi import TaminotchiViewSet
 
-from user.views import XodimViewSet
+from user.views import XodimViewSet, RegisterRequestAPIView, VerifyCEOAPIView
 
 urlpatterns = [
+    path('auth/register-request/', RegisterRequestAPIView.as_view(), name='register-request'),
+    path('auth/verify-ceo/', VerifyCEOAPIView.as_view(), name='verify-ceo'),
     path('admin/', admin.site.urls),
     path('', include('blog.urls')),
     path('users/', include('user.urls')),

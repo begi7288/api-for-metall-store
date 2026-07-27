@@ -1044,6 +1044,63 @@ class GuruhAndTegAPITestCase(APITestCase):
         self.assertFalse(Teg.objects.filter(id=teg_id).exists())
 
 
+class BotVerificationAPITestCase(APITestCase):
+    def test_registration_with_bot_verification(self):
+        from django.urls import reverse
+        from django.core.cache import cache
+        from user.models import Xodim, Biznes
+        
+        # 1. Initiate register request
+        payload = {
+            "ism": "Muhammad",
+            "telefon_raqam": "+998901234567",
+            "biznes_nomi": "Yangi Metall"
+        }
+        url_req = reverse('register-request')
+        response = self.client.post(url_req, payload, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], "Verification code sent.")
+        
+        # Check that request data is cached
+        cache_key = "reg_request_998901234567"
+        cached_data = cache.get(cache_key)
+        self.assertIsNotNone(cached_data)
+        self.assertEqual(cached_data['ism'], "Muhammad")
+        self.assertEqual(cached_data['biznes_nomi'], "Yangi Metall")
+        code = cached_data['code']
+        
+        # 2. Verify with WRONG code -> should fail (400)
+        url_verify = reverse('verify-ceo')
+        wrong_payload = {
+            "telefon_raqam": "+998901234567",
+            "kod": "000000"
+        }
+        response = self.client.post(url_verify, wrong_payload, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], "Noto'g'ri tasdiqlash kodi.")
+        
+        # 3. Verify with CORRECT code -> should succeed (201) and log in
+        correct_payload = {
+            "telefon_raqam": "+998901234567",
+            "kod": code
+        }
+        response = self.client.post(url_verify, correct_payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['ism'], "Muhammad")
+        self.assertEqual(response.data['rol'], "admin")
+        
+        # Check that cache is deleted after verification
+        self.assertIsNone(cache.get(cache_key))
+        
+        # Check database records
+        xodim = Xodim.objects.filter(telefon_raqam="+998901234567").first()
+        self.assertIsNotNone(xodim)
+        self.assertEqual(xodim.ism, "Muhammad")
+        self.assertEqual(xodim.biznes.nomi, "Yangi Metall")
+
+
+
 
 
 
