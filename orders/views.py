@@ -178,9 +178,9 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.holat != 'qoralama':
+        if instance.holat not in ['qoralama', 'bekor_qilingan']:
             return Response(
-                {"detail": "Faqat qoralama holatidagi buyurtmalarni o'chirish mumkin."},
+                {"detail": "Faqat qoralama yoki bekor qilingan buyurtmalarni o'chirish mumkin."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         return super().destroy(request, *args, **kwargs)
@@ -203,13 +203,20 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
         amount = request.data.get('amount')
         tolov_turi = request.data.get('tolov_turi')
         
-        if not amount or not tolov_turi:
+        if amount is None or tolov_turi is None or amount == "" or tolov_turi == "":
             return Response({"detail": "amount va tolov_turi maydonlari kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
             
         try:
             amount_decimal = Decimal(str(amount))
         except Exception:
             return Response({"detail": "To'lov summasi noto'g'ri ko'rinishda."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount_decimal == 0:
+            return Response({
+                'status': "To'lov muvaffaqiyatli amalga oshirildi (0 summalik to'lov o'tkazib yuborildi).",
+                'tolangan_summa': str(order_obj.tolangan_summa),
+                'nasiya_summa': str(order_obj.nasiya_summa)
+            }, status=status.HTTP_200_OK)
 
         xodim = request.user.xodim if hasattr(request.user, 'xodim') else None
         try:

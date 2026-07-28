@@ -53,10 +53,16 @@ class SupplierOrder(BaseModel):
     def add_payment(self, amount, tolov_turi, employee):
         if self.holat not in ['rasmiylashtirilgan', 'qabul_qilingan']:
             raise ValidationError("Faqat rasmiylashtirilgan yoki qabul qilingan buyurtmalarga to'lov qilish mumkin.")
-        if amount <= 0:
+        if amount < 0:
             raise ValidationError("To'lov summasi noldan katta bo'lishi kerak.")
+        if amount == 0:
+            return
+
         if amount > self.nasiya_summa:
-            raise ValidationError("To'lov summasi qolgan qarzdorlikdan oshib keta olmaydi.")
+            amount = self.nasiya_summa
+
+        if amount == 0:
+            return
 
         if tolov_turi == 'balans_postavshika':
             if self.taminotchi.balans < amount:
