@@ -115,6 +115,9 @@ class Xodim(BaseModel):
         
         # 2. Phone number validation
         if self.telefon_raqam:
+            self.telefon_raqam = re.sub(r'[^\d+]', '', self.telefon_raqam)
+            if self.telefon_raqam.count('+') > 0:
+                self.telefon_raqam = '+' + self.telefon_raqam.replace('+', '')
             phone = self.telefon_raqam
             has_plus = phone.startswith('+')
             if has_plus:
@@ -202,6 +205,15 @@ class Mijoz(BaseModel):
         if self.otasining_ismi:
             validate_name_letters(self.otasining_ismi, 'otasining_ismi')
         
+        if self.telefon_raqam_1:
+            self.telefon_raqam_1 = re.sub(r'[^\d+]', '', self.telefon_raqam_1)
+            if self.telefon_raqam_1.count('+') > 0:
+                self.telefon_raqam_1 = '+' + self.telefon_raqam_1.replace('+', '')
+        if self.telefon_raqam_2:
+            self.telefon_raqam_2 = re.sub(r'[^\d+]', '', self.telefon_raqam_2)
+            if self.telefon_raqam_2.count('+') > 0:
+                self.telefon_raqam_2 = '+' + self.telefon_raqam_2.replace('+', '')
+
         # Helper to validate phone format and length
         def validate_phone(phone, field_name):
             if not phone:

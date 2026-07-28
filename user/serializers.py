@@ -121,6 +121,9 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         except ValidationError as e:
             raise serializers.ValidationError(e.message_dict if hasattr(e, 'message_dict') else e.messages)
             
+        if 'telefon_raqam' in attrs:
+            attrs['telefon_raqam'] = temp_instance.telefon_raqam
+
         return attrs
 
 
@@ -209,6 +212,11 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         except ValidationError as e:
             raise serializers.ValidationError(e.message_dict if hasattr(e, 'message_dict') else e.messages)
             
+        if 'telefon_raqam_1' in attrs:
+            attrs['telefon_raqam_1'] = temp_instance.telefon_raqam_1
+        if 'telefon_raqam_2' in attrs:
+            attrs['telefon_raqam_2'] = temp_instance.telefon_raqam_2
+
         return attrs
 
 
@@ -259,6 +267,14 @@ class LoginSerializer(serializers.Serializer):
         ret = super().to_internal_value(data)
         if not ret.get('telefon_raqam'):
             raise serializers.ValidationError({'telefon_raqam': "Telefon raqami yoki login kiritilishi shart."})
+            
+        if 'telefon_raqam' in ret:
+            phone_val = ret['telefon_raqam']
+            phone_val = re.sub(r'[^\d+]', '', phone_val)
+            if phone_val.count('+') > 0:
+                phone_val = '+' + phone_val.replace('+', '')
+            ret['telefon_raqam'] = phone_val
+
         return ret
 
 
@@ -278,6 +294,14 @@ class RegisterSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        # Normalize phone number
+        telefon_raqam = attrs.get('telefon_raqam')
+        if telefon_raqam:
+            telefon_raqam = re.sub(r'[^\d+]', '', telefon_raqam)
+            if telefon_raqam.count('+') > 0:
+                telefon_raqam = '+' + telefon_raqam.replace('+', '')
+            attrs['telefon_raqam'] = telefon_raqam
+
         # 1. Sanitize text fields to prevent XSS
         if 'ism' in attrs:
             attrs['ism'] = sanitize_input(attrs['ism'])
@@ -285,7 +309,6 @@ class RegisterSerializer(serializers.ModelSerializer):
             attrs['biznes_nomi'] = sanitize_input(attrs['biznes_nomi'])
 
         # 2. Check if phone number is already registered
-        telefon_raqam = attrs.get('telefon_raqam')
         if telefon_raqam and Xodim.objects.filter(telefon_raqam=telefon_raqam).exists():
             raise serializers.ValidationError({'telefon_raqam': "Ushbu telefon raqami allaqachon ro'yxatdan o'tkazilgan."})
 

@@ -19,7 +19,8 @@ class PhoneRateThrottle(SimpleRateThrottle):
             return None
 
         # Standardize the phone format to build a consistent cache key
-        ident = str(telefon_raqam).strip().replace('+', '')
+        import re
+        ident = re.sub(r'[^\d]', '', str(telefon_raqam))
         return self.cache_format % {
             'scope': self.scope,
             'ident': ident

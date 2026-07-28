@@ -302,10 +302,14 @@ class RegisterRequestAPIView(APIView):
         if not ism or not telefon_raqam:
             return Response({"detail": "Ism va telefon raqami kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
             
+        import re
+        telefon_raqam = re.sub(r'[^\d+]', '', str(telefon_raqam))
+        if telefon_raqam.count('+') > 0:
+            telefon_raqam = '+' + telefon_raqam.replace('+', '')
+
         if Xodim.objects.filter(telefon_raqam=telefon_raqam).exists():
             return Response({"telefon_raqam": ["Ushbu telefon raqami allaqachon ro'yxatdan o'tkazilgan."]}, status=status.HTTP_400_BAD_REQUEST)
 
-        import re
         phone = telefon_raqam.strip().replace('+', '')
         if not re.match(r"^\d{7,15}$", phone):
             return Response({"telefon_raqam": ["Telefon raqami noto'g'ri formatda kiritildi."]}, status=status.HTTP_400_BAD_REQUEST)
@@ -357,6 +361,11 @@ class VerifyCEOAPIView(APIView):
         if not telefon_raqam or not kod:
             return Response({"detail": "Telefon raqami va tasdiqlash kodi kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
             
+        import re
+        telefon_raqam = re.sub(r'[^\d+]', '', str(telefon_raqam))
+        if telefon_raqam.count('+') > 0:
+            telefon_raqam = '+' + telefon_raqam.replace('+', '')
+
         phone = telefon_raqam.strip().replace('+', '')
         cache_key = f"reg_request_{phone}"
         cache_data = cache.get(cache_key)
