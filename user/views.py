@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
+from django.contrib.auth.models import User
 from django.contrib.auth.hashers import check_password
 from django.shortcuts import redirect, render
 from .models import Xodim, Mijoz, Biznes, Tarif, Guruh, Teg

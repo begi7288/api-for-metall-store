@@ -54,8 +54,17 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
     serializer_class = SupplierOrderSerializer
     permission_classes = [IsEmployee]
     filterset_class = SupplierOrderFilter
-    search_fields = ['id', 'nomi', 'taminotchi__nomi']
+    search_fields = ['=id', 'nomi', 'taminotchi__nomi']
     ordering_fields = ['umumiy_summa', 'nasiya_summa', 'yaratilgan_vaqt']
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = SupplierOrder.objects.all().order_by('-yaratilgan_vaqt')
+        if user.is_superuser:
+            return queryset
+        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
+            return queryset.filter(biznes=user.xodim.biznes)
+        return queryset.none()
 
     def list(self, request, *args, **kwargs):
         if request.query_params.get('export') == 'excel':
@@ -97,8 +106,6 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
     def buyurtma_stats(self, request):
         return self.order_stats(request)
 
-    # HIGH-5: AllowAny olib tashlandi — template ham autentifikatsiya talab qiladi
-
     @action(detail=False, methods=['get'])
     def template(self, request):
         import openpyxl
@@ -135,37 +142,6 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
         wb.save(response)
 
         return response
-
-    def list(self, request, *args, **kwargs):
-        if request.query_params.get('export') == 'excel':
-            queryset = self.filter_queryset(self.get_queryset())
-            headers = ["ID", "Nomi", "Do'kon", "Holat", "To'lov status", "Miqdori", "Buyurtma summasi", "Yaratildi", "Qabul qilindi"]
-            rows = []
-            for item in queryset:
-                serializer = self.get_serializer(item)
-                rows.append([
-                    item.id,
-                    item.nomi,
-                    item.dokon.nomi if item.dokon else "",
-                    item.get_holat_display() if hasattr(item, 'get_holat_display') else item.holat,
-                    serializer.data.get('tolov_status', ''),
-                    item.elementlar.aggregate(total=models.Sum('miqdori'))['total'] or 0,
-                    str(item.umumiy_summa),
-                    item.yaratilgan_vaqt.strftime("%d.%m.%Y %H:%M:%S") if item.yaratilgan_vaqt else "",
-                    item.haqiqiy_qabul_sana.strftime("%d.%m.%Y %H:%M:%S") if item.haqiqiy_qabul_sana else ""
-                ])
-            from products.views import generate_excel_response
-            return generate_excel_response("buyurtmalar", headers, rows)
-        return super().list(request, *args, **kwargs)
-
-    def get_queryset(self):
-        user = self.request.user
-        queryset = SupplierOrder.objects.all().order_by('-yaratilgan_vaqt')
-        if user.is_superuser:
-            return queryset
-        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
-            return queryset.filter(biznes=user.xodim.biznes)
-        return queryset.none()
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -266,25 +242,6 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
             'status': "Buyurtma bekor qilindi.",
             'holat': order_obj.holat
         }, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=['get'])
-    def template(self, request):
-        import openpyxl
-        from django.http import HttpResponse
-        from decimal import Decimal
-        
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Shablon"
-        
-        headers = ["Nomi", "Shtrix-kod", "Buyurtmaga", "Kelish narxi", "Ustama %", "Sotuv narxi", "Ulgurji narx"]
-        ws.append(headers)
-        ws.append(["Armatura", "9948493123", "500", "40000", "50", "60000", "64000"])
-        
-        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response['Content-Disposition'] = 'attachment; filename=buyurtma_shablon.xlsx'
-        wb.save(response)
-        return response
 
 class SupplierOrderReturnViewSet(viewsets.ModelViewSet):
     serializer_class = SupplierOrderReturnSerializer

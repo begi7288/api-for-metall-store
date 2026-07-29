@@ -866,7 +866,7 @@ class ClearDatabaseAPITestCase(APITestCase):
         self.super_token = Token.objects.create(user=self.superuser).key
 
         self.tarif = Tarif.objects.create(nomi="Standard")
-        self.biznes = Biznes.objects.create(nomi="Clear Test Biznes", tarif=self.tarif)
+        self.biznes = Biznes.objects.create(nomi="Clear Test Biznes", egasi_ism="Test Ega", tarif=self.tarif)
         self.regular_user = User.objects.create_user('regular', 'reg@test.com', 'pass123')
         self.xodim = Xodim.objects.create(
             user=self.regular_user, ism="Regular", familiya="User", telefon_raqam="+998909999999",
@@ -901,7 +901,7 @@ class GuruhAndTegAPITestCase(APITestCase):
 
         # Biznes 1
         self.tarif = Tarif.objects.create(nomi="Standard test")
-        self.biznes1 = Biznes.objects.create(nomi="Biznes A test", tarif=self.tarif)
+        self.biznes1 = Biznes.objects.create(nomi="Biznes A test", egasi_ism="Test Ega 1", tarif=self.tarif)
         self.user1 = User.objects.create_user('user1_t', 'u1@test.com', 'pass123')
         self.xodim1 = Xodim.objects.create(
             user=self.user1, ism="Ali", familiya="Valiyev", telefon_raqam="+998901111111",
@@ -910,7 +910,7 @@ class GuruhAndTegAPITestCase(APITestCase):
         self.token1 = Token.objects.create(user=self.user1).key
 
         # Biznes 2
-        self.biznes2 = Biznes.objects.create(nomi="Biznes B test", tarif=self.tarif)
+        self.biznes2 = Biznes.objects.create(nomi="Biznes B test", egasi_ism="Test Ega 2", tarif=self.tarif)
         self.user2 = User.objects.create_user('user2_t', 'u2@test.com', 'pass123')
         self.xodim2 = Xodim.objects.create(
             user=self.user2, ism="Vali", familiya="Aliev", telefon_raqam="+998902222222",

@@ -24,7 +24,7 @@ class TransferViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOrOmborchi]
     pagination_class = DynamicPagination
     filterset_class = TransferFilter
-    search_fields = ['id', 'nomi', 'dokondan__nomi', 'dokonga__nomi']
+    search_fields = ['=id', 'nomi', 'dokondan__nomi', 'dokonga__nomi']
     ordering_fields = ['miqdori', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
     def get_queryset(self):

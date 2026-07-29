@@ -234,7 +234,7 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         ]
 
     def get_tolangan_vaqt(self, obj):
-        payments = list(obj.to_lovlar.all())
+        payments = [p for p in obj.to_lovlar.all() if p.yaratilgan_vaqt]
         if payments:
             payments.sort(key=lambda x: x.yaratilgan_vaqt)
             return payments[-1].yaratilgan_vaqt

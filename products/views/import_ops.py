@@ -29,7 +29,7 @@ class ImportViewSet(viewsets.ModelViewSet):
     pagination_class = DynamicPagination
 
     filterset_class = ImportFilter
-    search_fields = ['id', 'nomi', 'dokon__nomi']
+    search_fields = ['=id', 'nomi', 'dokon__nomi']
     ordering_fields = ['miqdori', 'kelish_summasi', 'sotish_summasi', 'yaratilgan_vaqt']
 
     def list(self, request, *args, **kwargs):
