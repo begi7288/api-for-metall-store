@@ -43,6 +43,41 @@ class MahsulotRasmSerializer(serializers.ModelSerializer):
         fields = ['id', 'rasm', 'mahsulot', 'yaratilgan_vaqt', 'yangilangan_vaqt']
         read_only_fields = ['yaratilgan_vaqt', 'yangilangan_vaqt']
 
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            # 1. Parse mahsulot field from any variation
+            mahsulot_val = data.get('mahsulot') or data.get('mahsulot_id') or data.get('product') or data.get('product_id')
+            if isinstance(mahsulot_val, dict):
+                data['mahsulot'] = mahsulot_val.get('id')
+            elif mahsulot_val is not None:
+                data['mahsulot'] = mahsulot_val
+
+            # 2. Parse rasm field from any variation
+            rasm_val = data.get('rasm') or data.get('file') or data.get('image') or data.get('photo')
+            if isinstance(rasm_val, str) and (rasm_val.startswith('data:image/') or ';base64,' in rasm_val or len(rasm_val) > 100):
+                import base64
+                from django.core.files.base import ContentFile
+                import uuid
+
+                try:
+                    if ';base64,' in rasm_val:
+                        header, data_str = rasm_val.split(';base64,')
+                        ext = header.split('/')[-1] if '/' in header else 'jpg'
+                    else:
+                        data_str = rasm_val
+                        ext = 'jpg'
+                    decoded_file = base64.b64decode(data_str)
+                    file_name = f"{uuid.uuid4().hex[:10]}.{ext}"
+                    rasm_val = ContentFile(decoded_file, name=file_name)
+                except Exception:
+                    pass
+
+            if rasm_val is not None:
+                data['rasm'] = rasm_val
+
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         mahsulot = attrs.get('mahsulot')
         if mahsulot:
