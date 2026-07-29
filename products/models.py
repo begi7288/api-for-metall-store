@@ -1034,9 +1034,11 @@ class WriteOffItem(BaseModel):
         if self.write_off and self.write_off.biznes and self.mahsulot.biznes != self.write_off.biznes:
             raise ValidationError("Tanlangan mahsulot sizning biznesingizga tegishli emas.")
         if self.write_off and self.write_off.dokon:
-            qoldiq_exists = DokonQoldiq.objects.filter(mahsulot=self.mahsulot, dokon=self.write_off.dokon).exists()
-            if not qoldiq_exists:
-                raise ValidationError(f"'{self.mahsulot.nomi}' mahsuloti ushbu do'konda mavjud emas (qoldiq jadvalida topilmadi).")
+            DokonQoldiq.objects.get_or_create(
+                mahsulot=self.mahsulot,
+                dokon=self.write_off.dokon,
+                defaults={"miqdori": 0, "ogohlantirish": 2}
+            )
 
     def save(self, *args, **kwargs):
         self.clean()

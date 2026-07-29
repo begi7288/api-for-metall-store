@@ -14,7 +14,21 @@ class WriteOffItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['kelish_narxi', 'sotish_narxi']
 
     def get_mahsulot_shtrix_kod(self, obj):
-        return obj.mahsulot.shtrix_kod if obj.mahsulot else None
+        if obj.mahsulot:
+            if hasattr(obj.mahsulot, 'shtrix_kodlar') and obj.mahsulot.shtrix_kodlar.exists():
+                return obj.mahsulot.shtrix_kodlar.first().kod
+            return getattr(obj.mahsulot, 'shtrix_kod', None)
+        return None
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            mahsulot_val = data.get('mahsulot') or data.get('mahsulot_id') or data.get('id')
+            if isinstance(mahsulot_val, dict):
+                data['mahsulot'] = mahsulot_val.get('id')
+            elif mahsulot_val is not None:
+                data['mahsulot'] = mahsulot_val
+        return super().to_internal_value(data)
 
     def validate(self, attrs):
         mahsulot = attrs.get('mahsulot')
@@ -23,18 +37,35 @@ class WriteOffItemSerializer(serializers.ModelSerializer):
             write_off = self.instance.write_off
         
         if write_off and mahsulot:
-            if not DokonQoldiq.objects.filter(mahsulot=mahsulot, dokon=write_off.dokon).exists():
-                raise serializers.ValidationError({"mahsulot": f"'{mahsulot.nomi}' mahsuloti ushbu do'konda mavjud emas."})
+            DokonQoldiq.objects.get_or_create(mahsulot=mahsulot, dokon=write_off.dokon, defaults={"miqdori": 0, "ogohlantirish": 2})
         return attrs
 
 
 class WriteOffSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
+    nomi = serializers.CharField(required=False, allow_blank=True)
     elementlar = WriteOffItemSerializer(many=True, required=False)
     dokon_nomi = serializers.ReadOnlyField(source='dokon.nomi')
     sababi_display = serializers.CharField(source='get_sababi_display', read_only=True)
     yaratgan_xodim_nomi = serializers.SerializerMethodField()
     tasdiqlagan_xodim_nomi = serializers.SerializerMethodField()
     tugash_sanasi = serializers.ReadOnlyField(source='yangilangan_vaqt')
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            dokon_val = data.get('dokon') or data.get('dokon_id')
+            if isinstance(dokon_val, dict):
+                data['dokon'] = dokon_val.get('id')
+            elif dokon_val is not None:
+                data['dokon'] = dokon_val
+
+            if data.get('sababi'):
+                data['sababi'] = str(data['sababi']).lower().strip()
+
+            if not data.get('nomi'):
+                from django.utils.timezone import now
+                data['nomi'] = f"Hisobdan chiqarish {now().strftime('%Y.%m.%d %H:%M')}"
+        return super().to_internal_value(data)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -95,6 +126,10 @@ class WriteOffSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         if request and request.user and hasattr(request.user, 'xodim'):
             yaratgan_xodim = request.user.xodim
             biznes = yaratgan_xodim.biznes
+
+        if not validated_data.get('nomi'):
+            from django.utils.timezone import now
+            validated_data['nomi'] = f"Hisobdan chiqarish {now().strftime('%Y.%m.%d %H:%M')}"
 
         write_off = WriteOff.objects.create(biznes=biznes, yaratgan_xodim=yaratgan_xodim, **validated_data)
 
