@@ -263,24 +263,91 @@ class MahsulotViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], permission_classes=[IsAdminOrOmborchi])
     def bulk_operations(self, request):
         import json
-        action_type = request.data.get('action')
-        product_ids = request.data.get('product_ids', [])
-        params = request.data.get('params', {})
+        from decimal import Decimal, InvalidOperation, DecimalException
 
-        if isinstance(product_ids, str):
-            try:
-                product_ids = json.loads(product_ids)
-            except json.JSONDecodeError:
-                pass
+        data = request.data
+        action_type = data.get('action') or data.get('action_type') or data.get('type')
+        product_ids = data.get('product_ids') if 'product_ids' in data else data.get('ids')
+        if product_ids is None:
+            product_ids = data.get('mahsulotlar', [])
 
+        params = data.get('params', {})
         if isinstance(params, str):
             try:
                 params = json.loads(params)
-            except json.JSONDecodeError:
-                pass
+            except Exception:
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+
+        # Merge top-level request data into params if key not present in params
+        merged_params = dict(params)
+        for key in ['price_type', 'operation', 'value', 'erkin_narx', 'threshold', 'soni_turi', 'dokon', 'nol_qoldiq_otkazish', 'characteristics', 'archive']:
+            if key not in merged_params and key in data:
+                merged_params[key] = data.get(key)
+        params = merged_params
+
+        if isinstance(product_ids, str):
+            try:
+                parsed = json.loads(product_ids)
+                if isinstance(parsed, (list, int, float, str)):
+                    product_ids = parsed
+                else:
+                    product_ids = [product_ids]
+            except Exception:
+                if ',' in product_ids:
+                    product_ids = [x.strip() for x in product_ids.split(',') if x.strip()]
+                else:
+                    product_ids = [product_ids]
+
+        if isinstance(product_ids, (int, float, str)):
+            product_ids = [product_ids]
+
+        if isinstance(product_ids, list):
+            clean_ids = []
+            for pid in product_ids:
+                try:
+                    clean_ids.append(int(pid))
+                except (ValueError, TypeError):
+                    clean_ids.append(pid)
+            product_ids = clean_ids
 
         if not action_type:
             return Response({"detail": "Amal ('action') ko'rsatilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Normalize action_type
+        action_type_str = str(action_type).lower().strip()
+        ACTION_MAP = {
+            'edit_prices': 'edit_prices',
+            'edit_price': 'edit_prices',
+            'update_prices': 'edit_prices',
+            'update_price': 'edit_prices',
+            'change_prices': 'edit_prices',
+            'change_price': 'edit_prices',
+            'narx_ozgartirish': 'edit_prices',
+            'narxlar': 'edit_prices',
+            
+            'set_low_stock': 'set_low_stock',
+            'low_stock': 'set_low_stock',
+            'ogohlantirish': 'set_low_stock',
+            
+            'edit_characteristics': 'edit_characteristics',
+            'characteristics': 'edit_characteristics',
+            'xususiyatlar': 'edit_characteristics',
+            
+            'print_labels': 'print_labels',
+            'labels': 'print_labels',
+            'pechat': 'print_labels',
+            
+            'upload_images': 'upload_images',
+            'images': 'upload_images',
+            'rasmlar': 'upload_images',
+            
+            'archive': 'archive',
+            'arxiv': 'archive',
+        }
+        action_type = ACTION_MAP.get(action_type_str, action_type_str)
+
         if not product_ids or not isinstance(product_ids, list):
             return Response({"detail": "Mahsulotlar ro'yxati ('product_ids') yuborilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -387,15 +454,85 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                 queryset.update(erkin_narx=erkin_narx_val)
 
             if price_type is not None:
+                # Normalize price_type
+                price_type_str = str(price_type).lower().strip()
+                PRICE_TYPE_MAP = {
+                    'sotish_narxi': 'sotish_narxi',
+                    'sotish_narx': 'sotish_narxi',
+                    'sotish': 'sotish_narxi',
+                    'retail_price': 'sotish_narxi',
+                    'retail': 'sotish_narxi',
+                    
+                    'kelish_narxi': 'kelish_narxi',
+                    'kelish_narx': 'kelish_narxi',
+                    'kelish': 'kelish_narxi',
+                    'tan_narxi': 'kelish_narxi',
+                    'cost_price': 'kelish_narxi',
+                    'cost': 'kelish_narxi',
+                    
+                    'ulgurji_narx': 'ulgurji_narx',
+                    'ulgurji_narxi': 'ulgurji_narx',
+                    'ulgurji': 'ulgurji_narx',
+                    'optom_narx': 'ulgurji_narx',
+                    'optom_narxi': 'ulgurji_narx',
+                    'optom': 'ulgurji_narx',
+                    'wholesale_price': 'ulgurji_narx',
+                    'wholesale': 'ulgurji_narx',
+                }
+                price_type = PRICE_TYPE_MAP.get(price_type_str, price_type_str)
+
                 if price_type not in ['kelish_narxi', 'sotish_narxi', 'ulgurji_narx']:
                     return Response({"detail": "Noto'g'ri narx turi ('price_type')."}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Normalize operation
+                operation_str = str(operation or '').lower().strip()
+                OPERATION_MAP = {
+                    'belgilash': 'belgilash',
+                    'set': 'belgilash',
+                    'equal': 'belgilash',
+                    '=': 'belgilash',
+                    'ozgartirish': 'belgilash',
+                    'o\'zgartirish': 'belgilash',
+                    
+                    'oshirish_foiz': 'oshirish_foiz',
+                    'foiz_oshirish': 'oshirish_foiz',
+                    'increase_percent': 'oshirish_foiz',
+                    'percent_increase': 'oshirish_foiz',
+                    '+foiz': 'oshirish_foiz',
+                    
+                    'kamaytirish_foiz': 'kamaytirish_foiz',
+                    'foiz_kamaytirish': 'kamaytirish_foiz',
+                    'decrease_percent': 'kamaytirish_foiz',
+                    'percent_decrease': 'kamaytirish_foiz',
+                    '-foiz': 'kamaytirish_foiz',
+                    
+                    'oshirish_summa': 'oshirish_summa',
+                    'summa_oshirish': 'oshirish_summa',
+                    'increase_amount': 'oshirish_summa',
+                    'amount_increase': 'oshirish_summa',
+                    '+summa': 'oshirish_summa',
+                    'oshirish': 'oshirish_summa',
+                    
+                    'kamaytirish_summa': 'kamaytirish_summa',
+                    'summa_kamaytirish': 'kamaytirish_summa',
+                    'decrease_amount': 'kamaytirish_summa',
+                    'amount_decrease': 'kamaytirish_summa',
+                    '-summa': 'kamaytirish_summa',
+                    'kamaytirish': 'kamaytirish_summa',
+                }
+                operation = OPERATION_MAP.get(operation_str, operation_str)
+
                 if operation not in ['belgilash', 'oshirish_foiz', 'kamaytirish_foiz', 'oshirish_summa', 'kamaytirish_summa']:
                     return Response({"detail": "Noto'g'ri narx amaliyoti ('operation')."}, status=status.HTTP_400_BAD_REQUEST)
+
+                if value is None:
+                    return Response({"detail": "Narx qiymati ('value') kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+
                 try:
                     qiymat_val = Decimal(str(value))
                     if qiymat_val < 0:
                         raise ValueError
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, InvalidOperation, DecimalException):
                     return Response({"detail": "Narx qiymati ('value') manfiy bo'lmagan raqam bo'lishi shart."}, status=status.HTTP_400_BAD_REQUEST)
 
                 for p in queryset:
@@ -403,9 +540,9 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                     if operation == 'belgilash':
                         new_val = qiymat_val
                     elif operation == 'oshirish_foiz':
-                        new_val = old_val * (1 + qiymat_val / 100)
+                        new_val = old_val * (Decimal('1') + qiymat_val / Decimal('100'))
                     elif operation == 'kamaytirish_foiz':
-                        new_val = old_val * (1 - qiymat_val / 100)
+                        new_val = old_val * (Decimal('1') - qiymat_val / Decimal('100'))
                     elif operation == 'oshirish_summa':
                         new_val = old_val + qiymat_val
                     elif operation == 'kamaytirish_summa':
@@ -417,8 +554,11 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                         new_val = new_val.quantize(Decimal('0.01'))
 
                     setattr(p, price_type, new_val)
-                    if p.kelish_narxi > 0 and p.sotish_narxi > 0:
-                        p.ustama = (((p.sotish_narxi - p.kelish_narxi) / p.kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
+                    
+                    kelish = p.kelish_narxi or Decimal('0.00')
+                    sotish = p.sotish_narxi or Decimal('0.00')
+                    if kelish > 0 and sotish > 0:
+                        p.ustama = (((sotish - kelish) / kelish) * Decimal('100.00')).quantize(Decimal('0.01'))
                     p.save()
 
             return Response({"success": True, "message": "Mahsulot narxlari ommaviy o'zgartirildi."}, status=status.HTTP_200_OK)

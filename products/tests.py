@@ -1553,6 +1553,25 @@ class BulkOperationsAPITestCase(APITestCase):
         self.assertTrue(self.p1.erkin_narx)
         self.assertTrue(self.p2.erkin_narx)
 
+    def test_bulk_edit_prices_flat_payload_and_aliases(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
+        payload = {
+            "action": "edit_price",
+            "product_ids": f"{self.p1.id},{self.p2.id}",
+            "price_type": "sotish",
+            "operation": "belgilash",
+            "value": "2000"
+        }
+        response = self.client.post(self.bulk_url, payload, format='json')
+        if response.status_code != 200:
+            print("DEBUG ERROR:", response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.p1.refresh_from_db()
+        self.p2.refresh_from_db()
+        self.assertEqual(self.p1.sotish_narxi, Decimal("2000.00"))
+        self.assertEqual(self.p2.sotish_narxi, Decimal("2000.00"))
+
     def test_bulk_edit_characteristics(self):
         self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
         payload = {
