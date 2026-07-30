@@ -11,7 +11,8 @@ python manage.py collectstatic --no-input
 echo "Running migrations..."
 python manage.py migrate
 
-echo "Promoting admin user..."
-python manage.py shell -c "from django.contrib.auth.models import User; u = User.objects.filter(username='998909998877').first(); (setattr(u, 'is_staff', True), setattr(u, 'is_superuser', True), u.save()) if u else print('User not found')"
+echo "Resetting admin password..."
+python manage.py shell -c "from django.contrib.auth.models import User; u, _ = User.objects.get_or_create(username='begi'); u.set_password('begibrol7'); u.is_staff=True; u.is_superuser=True; u.save(); print('Superuser begi updated!')"
+
 
 echo "Build process completed!"
