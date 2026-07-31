@@ -95,9 +95,11 @@ class XodimRoliSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        ret['name'] = instance.nomi or ""
+        ret['roleId'] = instance.role_id or ""
         if not ret.get('huquqlar'):
             ret['huquqlar'] = get_default_huquqlar(instance.role_id)
-            ret['permissions'] = ret['huquqlar']
+        ret['permissions'] = ret['huquqlar']
         return ret
 
     def validate(self, attrs):
