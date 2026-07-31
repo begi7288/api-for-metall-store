@@ -26,16 +26,19 @@ app.use(
       // Allow the configured frontend origin
       if (incomingOrigin === allowedOrigin) return callback(null, true);
 
-      // In development allow localhost origins (ports vary)
-      if ((env.nodeEnv ?? "development") === "development") {
-        try {
-          const url = new URL(incomingOrigin);
-          if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-            return callback(null, true);
-          }
-        } catch (err) {
-          // Fall through to deny
+      // Allow Netlify and Vercel origins
+      try {
+        const url = new URL(incomingOrigin);
+        if (
+          url.hostname === "localhost" ||
+          url.hostname === "127.0.0.1" ||
+          url.hostname.endsWith(".netlify.app") ||
+          url.hostname.endsWith(".vercel.app")
+        ) {
+          return callback(null, true);
         }
+      } catch (err) {
+        // Fall through to deny
       }
 
       // Otherwise deny

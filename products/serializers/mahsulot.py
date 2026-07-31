@@ -273,6 +273,29 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 except json.JSONDecodeError:
                     pass
 
+        if not data.get('qoldiqlar'):
+            dokon_val = data.get('dokon') or data.get('dokon_id') or data.get('dokon_ids')
+            if dokon_val:
+                if hasattr(data, 'copy'):
+                    data = data.copy()
+                else:
+                    data = dict(data)
+                miqdor_val = data.get('miqdori', 0)
+                try:
+                    miqdor_val = int(miqdor_val)
+                except (ValueError, TypeError):
+                    miqdor_val = 0
+                ogohlantirish_val = data.get('ogohlantirish', 0)
+                try:
+                    ogohlantirish_val = int(ogohlantirish_val)
+                except (ValueError, TypeError):
+                    ogohlantirish_val = 0
+
+                if isinstance(dokon_val, list):
+                    data['qoldiqlar'] = [{'dokon': d, 'miqdori': miqdor_val, 'ogohlantirish': ogohlantirish_val} for d in dokon_val]
+                else:
+                    data['qoldiqlar'] = [{'dokon': dokon_val, 'miqdori': miqdor_val, 'ogohlantirish': ogohlantirish_val}]
+
         return super().to_internal_value(data)
 
     def validate(self, attrs):
@@ -283,7 +306,22 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         if not instance:
             qoldiqlar = attrs.get('qoldiqlar')
             if not qoldiqlar:
-                raise serializers.ValidationError({"qoldiqlar": "Yangi mahsulot yaratilayotganda kamida bitta do'kon uchun qoldiq kiritilgan bo'lishi shart."})
+                biznes = None
+                if request and request.user and hasattr(request.user, 'xodim') and request.user.xodim.biznes:
+                    biznes = request.user.xodim.biznes
+                
+                dokon_obj = None
+                if biznes:
+                    dokon_obj = Dokon.objects.filter(biznes=biznes).first()
+                    if not dokon_obj:
+                        dokon_obj = Dokon.objects.create(biznes=biznes, nomi="Asosiy do'kon")
+                else:
+                    dokon_obj = Dokon.objects.first()
+                
+                if dokon_obj:
+                    attrs['qoldiqlar'] = [{'dokon': dokon_obj, 'miqdori': attrs.get('miqdori', 0) or 0, 'ogohlantirish': attrs.get('ogohlantirish', 0) or 0}]
+                else:
+                    raise serializers.ValidationError({"qoldiqlar": "Yangi mahsulot yaratilayotganda kamida bitta do'kon uchun qoldiq kiritilgan bo'lishi shart."})
             
             if request and request.user and hasattr(request.user, 'xodim') and request.user.xodim.biznes:
                 biznes = request.user.xodim.biznes
