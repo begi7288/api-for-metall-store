@@ -422,3 +422,19 @@ class SupplierOrdersAPITestCase(APITestCase):
         self.assertEqual(res_excel.status_code, status.HTTP_200_OK)
         self.assertEqual(res_excel["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+    def test_csv_upload_without_optional_fields(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1)
+        csv_content = "Nomi;Shtrix-kod;Buyurtmaga;Kelish narxi;Ustama %;Sotuv narxi;Ulgurji narx\n" \
+                      "Truva 20;40112233;25;12 000;20;14,400;13 500\n"
+        csv_file = BytesIO(csv_content.encode('utf-8-sig'))
+        csv_file.name = "buyurtma_shabloni.csv"
+
+        payload = {
+            "fayl": csv_file
+        }
+        response = self.client.post(reverse('supplier-order-list'), payload, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('id', response.data)
+        self.assertEqual(Decimal(response.data['umumiy_summa']), Decimal('300000.00')) # 25 * 12000
+
+

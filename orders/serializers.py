@@ -208,6 +208,9 @@ class SupplierOrderItemSerializer(serializers.ModelSerializer):
 
 class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     nomi = serializers.CharField(required=False, allow_blank=True)
+    taminotchi = serializers.PrimaryKeyRelatedField(queryset=Taminotchi.objects.all(), required=False, allow_null=True)
+    dokon = serializers.PrimaryKeyRelatedField(queryset=Dokon.objects.all(), required=False, allow_null=True)
+    qabul_qilish_sanasi = serializers.DateField(required=False, allow_null=True)
     elementlar = SupplierOrderItemSerializer(many=True, required=False, style={'base_template': 'textarea.html'})
     to_lovlar = SupplierOrderPaymentSerializer(many=True, read_only=True)
     taminotchi_nomi = serializers.ReadOnlyField(source='taminotchi.nomi')
@@ -267,6 +270,19 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             return f"{obj.qabul_qilgan_xodim.ism} {obj.qabul_qilgan_xodim.familiya}"
         return ""
 
+    def to_internal_value(self, data):
+        if hasattr(data, 'copy'):
+            data = data.copy()
+        else:
+            data = dict(data)
+
+        for field in ['taminotchi', 'dokon', 'qabul_qilish_sanasi']:
+            val = data.get(field)
+            if val is None or val == '' or str(val).lower() in ('null', 'undefined', 'none'):
+                data.pop(field, None)
+
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         request = self.context.get('request')
         biznes = None
@@ -274,11 +290,27 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             biznes = request.user.xodim.biznes
 
         if biznes:
+            taminotchi = attrs.get('taminotchi')
+            if not taminotchi:
+                taminotchi = Taminotchi.objects.filter(biznes=biznes).first()
+                if not taminotchi:
+                    taminotchi = Taminotchi.objects.create(biznes=biznes, nomi="Asosiy yetkazib beruvchi")
+                attrs['taminotchi'] = taminotchi
+            elif taminotchi.biznes != biznes:
+                raise serializers.ValidationError({"taminotchi": "Tanlangan yetkazib beruvchi sizning kompaniyangizga tegishli emas."})
 
-            
             dokon = attrs.get('dokon')
-            if dokon and dokon.biznes != biznes:
+            if not dokon:
+                dokon = Dokon.objects.filter(biznes=biznes).first()
+                if not dokon:
+                    dokon = Dokon.objects.create(biznes=biznes, nomi="Asosiy do'kon")
+                attrs['dokon'] = dokon
+            elif dokon.biznes != biznes:
                 raise serializers.ValidationError({"dokon": "Tanlangan do'kon sizning kompaniyangizga tegishli emas."})
+
+        if not attrs.get('qabul_qilish_sanasi'):
+            from django.utils.timezone import now
+            attrs['qabul_qilish_sanasi'] = now().date()
 
         elementlar_data = attrs.get('elementlar', [])
         fayl = attrs.get('fayl') or (self.instance and self.instance.fayl)
@@ -287,7 +319,7 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
         for idx, item in enumerate(elementlar_data):
             mahsulot = item.get('mahsulot')
-            if biznes and mahsulot.biznes != biznes:
+            if mahsulot and biznes and mahsulot.biznes != biznes:
                 raise serializers.ValidationError({"elementlar": f"Element {idx+1}: Tanlangan mahsulot ({mahsulot.nomi}) sizning kompaniyangizga tegishli emas."})
 
         instance = self.instance
@@ -389,7 +421,37 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         return instance
 
     def _parse_and_save_elements_from_file(self, file_obj, order, biznes):
-        file_name = file_obj.name
+        def clean_num_str(val):
+            if val is None:
+                return "0"
+            s = str(val).strip()
+            s = s.replace('\xa0', '').replace(' ', '')
+            if ',' in s and '.' not in s:
+                parts = s.split(',')
+                if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+                    s = s.replace(',', '')
+                else:
+                    s = s.replace(',', '.')
+            elif ',' in s and '.' in s:
+                s = s.replace(',', '')
+            return s
+
+        def parse_decimal_safe(val):
+            try:
+                s = clean_num_str(val)
+                d = Decimal(s)
+                return d.quantize(Decimal('0.01'))
+            except Exception:
+                return Decimal('0.00')
+
+        def parse_int_safe(val):
+            try:
+                s = clean_num_str(val)
+                return int(float(s))
+            except Exception:
+                return 0
+
+        file_name = file_obj.name.lower()
         file_obj.seek(0)
         content = file_obj.read()
 
@@ -401,33 +463,50 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 if any(x is not None for x in row):
                     rows.append([str(x) if x is not None else "" for x in row])
         else:
-            try:
-                decoded = content.decode('utf-8')
-            except UnicodeDecodeError:
-                decoded = content.decode('latin-1')
-            reader = csv.reader(decoded.splitlines())
-            for row in reader:
-                if any(x != "" for x in row):
-                    rows.append(row)
+            decoded = None
+            for encoding in ['utf-8-sig', 'utf-8', 'cp1251', 'latin-1']:
+                try:
+                    decoded = content.decode(encoding)
+                    break
+                except (UnicodeDecodeError, Exception):
+                    continue
+            if not decoded:
+                decoded = content.decode('utf-8', errors='ignore')
+
+            lines = [line for line in decoded.splitlines() if line.strip()]
+            if lines:
+                delimiter = ','
+                first_line = lines[0]
+                if ';' in first_line and first_line.count(';') >= first_line.count(','):
+                    delimiter = ';'
+                elif '\t' in first_line:
+                    delimiter = '\t'
+
+                reader = csv.reader(lines, delimiter=delimiter)
+                for row in reader:
+                    if any(x.strip() != "" for x in row):
+                        rows.append(row)
 
         if not rows:
-            raise serializers.ValidationError("Fayl bo'sh yoki uni o'qib bo'lmadi.")
+            order.delete()
+            raise serializers.ValidationError({"fayl": "Fayl bo'sh yoki uni o'qib bo'lmadi."})
 
-        headers = [str(h).lower().strip() for h in rows[0]]
+        headers = [str(h).lower().strip().replace('\ufeff', '') for h in rows[0]]
         col_mapping = {}
         for idx, h in enumerate(headers):
-            if any(k in h for k in ['nomi', 'name', 'наименование', 'tovar']):
+            if any(k in h for k in ['nomi', 'name', 'наименование', 'tovar', 'mahsulot']):
                 col_mapping['nomi'] = idx
             elif any(k in h for k in ['shtrix', 'barcode', 'баркод', 'kod', 'код']):
                 col_mapping['shtrix_kod'] = idx
-            elif any(k in h for k in ['miqdor', 'qty', 'kol', 'кол', 'buyurtmaga']):
+            elif any(k in h for k in ['miqdor', 'qty', 'kol', 'кол', 'buyurtmaga', 'soni', 'son']):
                 col_mapping['miqdori'] = idx
-            elif any(k in h for k in ['kelish', 'cost', 'поставки']):
+            elif any(k in h for k in ['kelish', 'cost', 'поставки', 'tannarx', 'kirish']):
                 col_mapping['kelish_narxi'] = idx
             elif any(k in h for k in ['ustama', 'markup', 'наценка']):
                 col_mapping['ustama'] = idx
-            elif any(k in h for k in ['sotish', 'retail', 'sotuv', 'продажи', 'розничная']):
-                col_mapping['sotish_narxi'] = idx
+            elif any(k in h for k in ['sotish', 'retail', 'sotuv', 'продажи', 'розничная', 'narxi']):
+                if 'kelish' not in h and 'ulgurji' not in h:
+                    col_mapping['sotish_narxi'] = idx
             elif any(k in h for k in ['ulgurji', 'wholesale', 'оптом']):
                 col_mapping['ulgurji_narx'] = idx
 
@@ -439,42 +518,38 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         if 'sotish_narxi' not in col_mapping and len(headers) > 5: col_mapping['sotish_narxi'] = 5
         if 'ulgurji_narx' not in col_mapping and len(headers) > 6: col_mapping['ulgurji_narx'] = 6
 
-        for row in rows[1:]:
+        start_row_idx = 1
+        first_row_nomi = rows[0][col_mapping['nomi']].strip().lower() if 'nomi' in col_mapping and len(rows[0]) > col_mapping['nomi'] else ""
+        if any(k in first_row_nomi for k in ['nomi', 'name', 'наименование', 'tovar', 'mahsulot']):
+            start_row_idx = 1
+        else:
+            start_row_idx = 0
+
+        for row in rows[start_row_idx:]:
             nomi = row[col_mapping['nomi']].strip() if 'nomi' in col_mapping and len(row) > col_mapping['nomi'] else ""
             if not nomi:
                 continue
 
             shtrix_kod = row[col_mapping['shtrix_kod']].strip() if 'shtrix_kod' in col_mapping and len(row) > col_mapping['shtrix_kod'] else ""
-            
-            miqdori_str = row[col_mapping['miqdori']].strip() if 'miqdori' in col_mapping and len(row) > col_mapping['miqdori'] else "0"
-            try:
-                miqdori = int(float(miqdori_str))
-            except ValueError:
-                miqdori = 0
+            miqdori = parse_int_safe(row[col_mapping['miqdori']]) if 'miqdori' in col_mapping and len(row) > col_mapping['miqdori'] else 0
+            kelish_narxi = parse_decimal_safe(row[col_mapping['kelish_narxi']]) if 'kelish_narxi' in col_mapping and len(row) > col_mapping['kelish_narxi'] else Decimal('0.00')
+            ustama = parse_decimal_safe(row[col_mapping['ustama']]) if 'ustama' in col_mapping and len(row) > col_mapping['ustama'] else Decimal('0.00')
+            sotish_narxi = parse_decimal_safe(row[col_mapping['sotish_narxi']]) if 'sotish_narxi' in col_mapping and len(row) > col_mapping['sotish_narxi'] else Decimal('0.00')
+            ulgurji_narx = parse_decimal_safe(row[col_mapping['ulgurji_narx']]) if 'ulgurji_narx' in col_mapping and len(row) > col_mapping['ulgurji_narx'] else Decimal('0.00')
 
-            kelish_str = row[col_mapping['kelish_narxi']].strip() if 'kelish_narxi' in col_mapping and len(row) > col_mapping['kelish_narxi'] else "0"
-            try:
-                kelish_narxi = Decimal(kelish_str)
-            except (ValueError, TypeError):
-                kelish_narxi = Decimal('0.00')
+            if kelish_narxi > Decimal('0.00'):
+                if sotish_narxi < kelish_narxi:
+                    if ustama > Decimal('0.00'):
+                        sotish_narxi = (kelish_narxi * (Decimal('1.00') + ustama / Decimal('100.00'))).quantize(Decimal('0.01'))
+                    else:
+                        sotish_narxi = kelish_narxi
+                if ustama == Decimal('0.00') and sotish_narxi > kelish_narxi:
+                    ustama = (((sotish_narxi - kelish_narxi) / kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
+                if ustama > Decimal('100.00'):
+                    ustama = Decimal('100.00')
 
-            ustama_str = row[col_mapping['ustama']].strip() if 'ustama' in col_mapping and len(row) > col_mapping['ustama'] else "0"
-            try:
-                ustama = Decimal(ustama_str)
-            except (ValueError, TypeError):
-                ustama = Decimal('0.00')
-
-            sotish_str = row[col_mapping['sotish_narxi']].strip() if 'sotish_narxi' in col_mapping and len(row) > col_mapping['sotish_narxi'] else "0"
-            try:
-                sotish_narxi = Decimal(sotish_str)
-            except (ValueError, TypeError):
-                sotish_narxi = Decimal('0.00')
-
-            ulgurji_str = row[col_mapping['ulgurji_narx']].strip() if 'ulgurji_narx' in col_mapping and len(row) > col_mapping['ulgurji_narx'] else "0"
-            try:
-                ulgurji_narx = Decimal(ulgurji_str)
-            except (ValueError, TypeError):
-                ulgurji_narx = Decimal('0.00')
+            if ulgurji_narx < kelish_narxi:
+                ulgurji_narx = sotish_narxi
 
             product = None
             if shtrix_kod:
@@ -483,12 +558,13 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 except Exception:
                     pass
             if not product:
-                product = Mahsulot.objects.filter(biznes=biznes, nomi=nomi).first()
+                product = Mahsulot.objects.filter(biznes=biznes, nomi__iexact=nomi).first()
 
             if not product:
                 if biznes and biznes.tarif:
                     limit = biznes.tarif.mahsulot_limiti
                     if Mahsulot.objects.filter(biznes=biznes).count() >= limit:
+                        order.delete()
                         raise serializers.ValidationError({"detail": f"Tarif rejangiz bo'yicha mahsulotlar soni limiti ({limit}) tugagan. Yangi mahsulot yaratib bo'lmaydi."})
                 product = Mahsulot.objects.create(
                     biznes=biznes,
@@ -500,8 +576,11 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                     ulgurji_narx=ulgurji_narx,
                     miqdori=0
                 )
-                if shtrix_kod:
-                    MahsulotShtrixKod.objects.create(mahsulot=product, kod=shtrix_kod)
+                if shtrix_kod and not MahsulotShtrixKod.objects.filter(kod=shtrix_kod).exists():
+                    try:
+                        MahsulotShtrixKod.objects.create(mahsulot=product, kod=shtrix_kod)
+                    except Exception:
+                        pass
 
             SupplierOrderItem.objects.create(
                 order=order,
