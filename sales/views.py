@@ -114,25 +114,35 @@ class SaleViewSet(viewsets.ModelViewSet):
         jami_chiqim = Decimal('0.00')
         if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
             biznes = user.xodim.biznes
-            from orders.models import SupplierOrderPayment
-            from products.models import WriteOff
+            from orders.models import SupplierOrderPayment, SupplierOrder
+            from products.models import WriteOff, Mahsulot
             
             p_qs = SupplierOrderPayment.objects.filter(order__biznes=biznes)
+            so_qs = SupplierOrder.objects.filter(biznes=biznes, holat__in=['qabul_qilingan', 'yakunlangan'])
             w_qs = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan')
+            m_qs = Mahsulot.objects.filter(biznes=biznes, miqdori__gt=0, kelish_narxi__gt=0)
             
             dan = request.query_params.get('dan') or request.query_params.get('sana_dan')
             gacha = request.query_params.get('gacha') or request.query_params.get('sana_gacha')
             
             if dan:
                 p_qs = p_qs.filter(yaratilgan_vaqt__date__gte=dan)
+                so_qs = so_qs.filter(yaratilgan_vaqt__date__gte=dan)
                 w_qs = w_qs.filter(yaratilgan_vaqt__date__gte=dan)
+                m_qs = m_qs.filter(yaratilgan_vaqt__date__gte=dan)
             if gacha:
                 p_qs = p_qs.filter(yaratilgan_vaqt__date__lte=gacha)
+                so_qs = so_qs.filter(yaratilgan_vaqt__date__lte=gacha)
                 w_qs = w_qs.filter(yaratilgan_vaqt__date__lte=gacha)
+                m_qs = m_qs.filter(yaratilgan_vaqt__date__lte=gacha)
                 
             supplier_payments_sum = p_qs.aggregate(total=models.Sum('tolangan_summa'))['total'] or Decimal('0.00')
+            supplier_orders_sum = so_qs.aggregate(total=models.Sum('umumiy_summa'))['total'] or Decimal('0.00')
             write_offs_sum = w_qs.aggregate(total=models.Sum('kelish_summasi'))['total'] or Decimal('0.00')
-            jami_chiqim = supplier_payments_sum + write_offs_sum
+            product_income_sum = m_qs.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
+
+            stock_expense = max(supplier_orders_sum, supplier_payments_sum) + product_income_sum
+            jami_chiqim = stock_expense + write_offs_sum
 
         return Response({
             'jami_kirim': str(jami_kirim),
@@ -218,22 +228,24 @@ class SaleViewSet(viewsets.ModelViewSet):
 
         if biznes:
             from orders.models import SupplierOrder, SupplierOrderPayment
-            from products.models import WriteOff
+            from products.models import WriteOff, Mahsulot
 
             xarajat_period = Xarajat.objects.filter(biznes=biznes, yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('miqdor'))['t'] or Decimal('0.00')
             sp_period = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('tolangan_summa'))['t'] or Decimal('0.00')
             so_period = SupplierOrder.objects.filter(biznes=biznes, holat__in=['qabul_qilingan', 'yakunlangan'], yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('umumiy_summa'))['t'] or Decimal('0.00')
             wo_period = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('kelish_summasi'))['t'] or Decimal('0.00')
+            prod_period = Mahsulot.objects.filter(biznes=biznes, miqdori__gt=0, kelish_narxi__gt=0, yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['t'] or Decimal('0.00')
             
-            kirim_xarajati_period = max(so_period, sp_period)
+            kirim_xarajati_period = max(so_period, sp_period) + prod_period
             bugungi_xarajat = xarajat_period + kirim_xarajati_period + wo_period
 
             xarajat_all = Xarajat.objects.filter(biznes=biznes).aggregate(t=models.Sum('miqdor'))['t'] or Decimal('0.00')
             sp_all = SupplierOrderPayment.objects.filter(order__biznes=biznes).aggregate(t=models.Sum('tolangan_summa'))['t'] or Decimal('0.00')
             so_all = SupplierOrder.objects.filter(biznes=biznes, holat__in=['qabul_qilingan', 'yakunlangan']).aggregate(t=models.Sum('umumiy_summa'))['t'] or Decimal('0.00')
             wo_all = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan').aggregate(t=models.Sum('kelish_summasi'))['t'] or Decimal('0.00')
+            prod_all = Mahsulot.objects.filter(biznes=biznes, miqdori__gt=0, kelish_narxi__gt=0).aggregate(t=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['t'] or Decimal('0.00')
             
-            kirim_xarajati_all = max(so_all, sp_all)
+            kirim_xarajati_all = max(so_all, sp_all) + prod_all
             jami_xarajat = xarajat_all + kirim_xarajati_all + wo_all
 
         sof_pul = max(Decimal('0.00'), bugungi_savdo - bugungi_xarajat)
@@ -264,7 +276,8 @@ class SaleViewSet(viewsets.ModelViewSet):
                 x_d = Xarajat.objects.filter(biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('miqdor'))['t'] or Decimal('0.00')
                 s_d = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('tolangan_summa'))['t'] or Decimal('0.00')
                 w_d = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('kelish_summasi'))['t'] or Decimal('0.00')
-                day_exp = x_d + s_d + w_d
+                p_d = Mahsulot.objects.filter(biznes=biznes, miqdori__gt=0, kelish_narxi__gt=0, yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['t'] or Decimal('0.00')
+                day_exp = x_d + s_d + w_d + p_d
             dinamikasi.append({
                 "sana": cur_date.strftime("%Y-%m-%d"),
                 "date": cur_date.strftime("%Y-%m-%d"),
@@ -515,7 +528,9 @@ class SaleViewSet(viewsets.ModelViewSet):
             x_val = Xarajat.objects.filter(biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('miqdor'))['total'] or Decimal('0.00')
             sp_val = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('tolangan_summa'))['total'] or Decimal('0.00')
             wo_val = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('kelish_summasi'))['total'] or Decimal('0.00')
-            chiqim = x_val + sp_val + wo_val
+            from products.models import Mahsulot
+            prod_val = Mahsulot.objects.filter(biznes=biznes, miqdori__gt=0, kelish_narxi__gt=0, yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
+            chiqim = x_val + sp_val + wo_val + prod_val
 
             sof = max(Decimal('0.00'), kirim - chiqim)
 
