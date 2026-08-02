@@ -65,28 +65,32 @@ class Sale(BaseModel):
             self.chegirma_summasi = self.chegirma_qiymati
             
         self.yakuniy_summa = max(Decimal('0.00'), self.oraliq_jami - self.chegirma_summasi)
-        self.nasiya_summa = max(Decimal('0.00'), self.yakuniy_summa - self.tolangan_summa)
+        if self.tolov_usuli == 'nasiya' and self.tolangan_summa == Decimal('0.00'):
+            self.nasiya_summa = self.yakuniy_summa
+        else:
+            self.nasiya_summa = max(Decimal('0.00'), self.yakuniy_summa - self.tolangan_summa)
         
         super().save(*args, **kwargs)
 
-        # Nasiyaga sotilgan bo'lsa va mijoz bo'lsa -> MijozQarzi yaratish/yangilash
-        if self.nasiya_summa > Decimal('0.00') and self.mijoz:
+        # Nasiyaga sotilgan bo'lsa (yoki tolov_usuli='nasiya') va mijoz bo'lsa -> MijozQarzi yaratish/yangilash
+        if (self.nasiya_summa > Decimal('0.00') or self.tolov_usuli == 'nasiya') and self.mijoz:
             from user.models import MijozQarzi
+            debt_amount = self.nasiya_summa if self.nasiya_summa > Decimal('0.00') else self.yakuniy_summa
             qarz, created = MijozQarzi.objects.get_or_create(
                 sotuv=self,
                 defaults={
                     'biznes': self.biznes,
                     'mijoz': self.mijoz,
-                    'umumiy_summa': self.nasiya_summa,
+                    'umumiy_summa': debt_amount,
                     'tolangan_summa': Decimal('0.00'),
-                    'qoldiq_summa': self.nasiya_summa,
+                    'qoldiq_summa': debt_amount,
                     'holat': 'tolanmagan'
                 }
             )
             if not created:
                 qarz.biznes = self.biznes
                 qarz.mijoz = self.mijoz
-                qarz.umumiy_summa = self.nasiya_summa
+                qarz.umumiy_summa = debt_amount
                 qarz.save()
 
     def __str__(self):

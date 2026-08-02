@@ -62,6 +62,20 @@ class SaleSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             return str(obj.tolangan_summa)
         return '0.00'
 
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            raw_method = str(data.get('tolov_usuli') or data.get('payment_method') or '').strip().lower()
+            if raw_method in ['qarzga', 'qarz', 'nasiya', 'nasiyaga', 'credit', 'nasiya_tolov', 'qarz_tolov']:
+                data['tolov_usuli'] = 'nasiya'
+                if 'tolangan_summa' not in data and 'amount_paid' not in data:
+                    data['tolangan_summa'] = '0.00'
+            elif raw_method in ['karta', 'card', 'uzcard', 'humo', 'visa', 'mastercard', 'sov. karta', 'sov_karta', 'sovut_karta']:
+                data['tolov_usuli'] = 'karta'
+            elif raw_method in ['naqd', 'cash', 'naqd_pul', 'naqd pul']:
+                data['tolov_usuli'] = 'naqd'
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         holat = attrs.get('holat', self.instance.holat if self.instance else 'yakunlangan')
         elementlar_data = attrs.get('elementlar', [])

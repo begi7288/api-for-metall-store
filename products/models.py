@@ -178,7 +178,6 @@ class Mahsulot(BaseModel):
         is_new = not self.pk
         super().save(*args, **kwargs)
         if is_new and not kwargs.get('raw', False):
-
             custom_barcodes = getattr(self, '_custom_barcodes', None)
             if custom_barcodes:
                 for code in custom_barcodes:
@@ -186,6 +185,24 @@ class Mahsulot(BaseModel):
             else:
                 code = self.generate_unique_barcode()
                 MahsulotShtrixKod.objects.create(mahsulot=self, kod=code)
+
+            if self.miqdori > 0 and self.kelish_narxi > 0 and self.biznes:
+                try:
+                    from sales.models import Xarajat, XarajatKategoriyasi
+                    from django.utils import timezone
+                    kat, _ = XarajatKategoriyasi.objects.get_or_create(nomi="Mahsulot kirimi", biznes=self.biznes)
+                    total_cost = Decimal(str(self.miqdori)) * Decimal(str(self.kelish_narxi))
+                    unit_name = self.olchov_birligi.short_name if self.olchov_birligi else "dona"
+                    Xarajat.objects.create(
+                        biznes=self.biznes,
+                        kategoriya=kat,
+                        taminotchi=self.taminotchi,
+                        miqdor=total_cost,
+                        sana=timezone.now().date(),
+                        izoh=f"Yangi mahsulot kirimi: {self.nomi} ({self.miqdori} {unit_name})"
+                    )
+                except Exception:
+                    pass
 
     def generate_unique_barcode(self):
         while True:
