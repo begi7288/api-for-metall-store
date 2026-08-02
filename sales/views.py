@@ -250,22 +250,43 @@ class SaleViewSet(viewsets.ModelViewSet):
 
         sof_pul = max(Decimal('0.00'), bugungi_savdo - bugungi_xarajat)
 
-        credit_sales_qs = base_sales.filter(yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date, nasiya_summa__gt=0)
-        nasiyaga_sotilgan = credit_sales_qs.aggregate(total=models.Sum('nasiya_summa'))['total'] or Decimal('0.00')
+        credit_sales_qs = period_sales_qs.filter(
+            models.Q(tolov_usuli__in=['nasiya', 'qarzga', 'qarz', 'nasiyaga', 'credit']) |
+            models.Q(nasiya_summa__gt=0)
+        )
+        nasiyaga_sotilgan = (
+            credit_sales_qs.aggregate(total=models.Sum('nasiya_summa'))['total'] or
+            credit_sales_qs.aggregate(total=models.Sum('yakuniy_summa'))['total'] or
+            Decimal('0.00')
+        )
         nasiya_buyurtmalar_soni = credit_sales_qs.count()
 
-        total_sales_count = period_sales_qs.count()
-        naqd_count = period_sales_qs.filter(tolov_usuli='naqd').count()
-        karta_count = period_sales_qs.filter(tolov_usuli='karta').count()
-        nasiya_count = period_sales_qs.filter(tolov_usuli='nasiya').count()
+        naqd_sales = period_sales_qs.filter(models.Q(tolov_usuli__in=['naqd', 'cash', 'naqd_pul', 'naqd pul']))
+        karta_sales = period_sales_qs.filter(models.Q(tolov_usuli__in=['karta', 'card', 'uzcard', 'humo', 'visa', 'mastercard', 'sov. karta']))
+        nasiya_sales = credit_sales_qs
 
-        naqd_summa = period_sales_qs.filter(tolov_usuli='naqd').aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
-        karta_summa = period_sales_qs.filter(tolov_usuli='karta').aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
-        nasiya_summa = period_sales_qs.filter(tolov_usuli='nasiya').aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+        naqd_summa = naqd_sales.aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+        karta_summa = karta_sales.aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+        nasiya_summa = nasiya_sales.aggregate(t=models.Sum('nasiya_summa'))['t'] or nasiya_sales.aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
 
-        naqd_percent = round((naqd_count / total_sales_count * 100), 1) if total_sales_count > 0 else 0.0
-        karta_percent = round((karta_count / total_sales_count * 100), 1) if total_sales_count > 0 else 0.0
-        nasiya_percent = round((nasiya_count / total_sales_count * 100), 1) if total_sales_count > 0 else 0.0
+        unspecified_sales = period_sales_qs.exclude(id__in=naqd_sales).exclude(id__in=karta_sales).exclude(id__in=nasiya_sales)
+        unspecified_summa = unspecified_sales.aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+        if unspecified_summa > 0:
+            naqd_summa += unspecified_summa
+
+        total_payment_sum = naqd_summa + karta_summa + nasiya_summa
+        if total_payment_sum <= 0 and bugungi_savdo > 0:
+            total_payment_sum = bugungi_savdo
+            naqd_summa = bugungi_savdo
+
+        if total_payment_sum > 0:
+            naqd_percent = round(float((naqd_summa / total_payment_sum) * 100), 1)
+            karta_percent = round(float((karta_summa / total_payment_sum) * 100), 1)
+            nasiya_percent = round(float((nasiya_summa / total_payment_sum) * 100), 1)
+        else:
+            naqd_percent = 0.0
+            karta_percent = 0.0
+            nasiya_percent = 0.0
 
         dinamikasi = []
         cur_date = start_date
