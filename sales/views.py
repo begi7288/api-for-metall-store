@@ -331,6 +331,19 @@ class SaleViewSet(viewsets.ModelViewSet):
         chegirmalar_summasi = period_sales_qs.aggregate(t=models.Sum('chegirma_summasi'))['t'] or Decimal('0.00')
         chegirmali_sotuvlar_soni = period_sales_qs.filter(chegirma_summasi__gt=0).count()
 
+        # 4. Live Ombor Stock Statistics (Ombordagi jonli o'zgarishlar)
+        ombor_tovar_qiymati = Decimal('0.00')
+        ombor_sotish_summasi = Decimal('0.00')
+        ombor_tovarlar_soni = 0
+        tovarlar_turlari_soni = 0
+        if biznes:
+            from products.models import Mahsulot
+            m_active = Mahsulot.objects.filter(biznes=biznes, is_active=True)
+            tovarlar_turlari_soni = m_active.count()
+            ombor_tovarlar_soni = m_active.aggregate(t=models.Sum('miqdori'))['t'] or 0
+            ombor_tovar_qiymati = m_active.aggregate(t=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['t'] or Decimal('0.00')
+            ombor_sotish_summasi = m_active.aggregate(t=models.Sum(models.F('miqdori') * models.F('sotish_narxi')))['t'] or Decimal('0.00')
+
         return Response({
             'bugungi_savdo': str(bugungi_savdo),
             'today_sales': str(bugungi_savdo),
@@ -348,6 +361,21 @@ class SaleViewSet(viewsets.ModelViewSet):
             'net_cash': str(sof_pul),
             'netCash': str(sof_pul),
             'kassa_holati': str(sof_pul),
+            'kassaHolati': str(sof_pul),
+            'nasiyaga_sotilgan': str(nasiyaga_sotilgan),
+            'credit_sales': str(nasiyaga_sotilgan),
+            'creditSales': str(nasiyaga_sotilgan),
+            'nasiya_buyurtmalar_soni': nasiya_buyurtmalar_soni,
+
+            # Jonli Ombor Statistikasi
+            'ombor_tovar_qiymati': str(ombor_tovar_qiymati),
+            'ombor_qiymati': str(ombor_tovar_qiymati),
+            'inventory_cost': str(ombor_tovar_qiymati),
+            'ombor_sotish_summasi': str(ombor_sotish_summasi),
+            'inventory_sale_value': str(ombor_sotish_summasi),
+            'ombor_tovarlar_soni': ombor_tovarlar_soni,
+            'total_stock_quantity': ombor_tovarlar_soni,
+            'tovarlar_turlari_soni': tovarlar_turlari_soni,
             'kassaHolati': str(sof_pul),
             'nasiyaga_sotilgan': str(nasiyaga_sotilgan),
             'credit_sales': str(nasiyaga_sotilgan),
