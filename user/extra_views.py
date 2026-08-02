@@ -65,7 +65,7 @@ class OlchovBirligiSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OlchovBirligi
-        fields = ['id', 'biznes', 'nomi', 'name', 'short_name', 'shortName', 'qisqa_nom', 'qisqaNom']
+        fields = ['id', 'biznes', 'nomi', 'name', 'short_name', 'shortName', 'qisqa_nom', 'qisqaNom', 'is_active']
         read_only_fields = ['biznes']
 
     def validate(self, attrs):
@@ -272,6 +272,7 @@ class BrandsViewSet(viewsets.ModelViewSet):
 class UnitsViewSet(viewsets.ModelViewSet):
     serializer_class = OlchovBirligiSerializer
     permission_classes = [IsAuthenticated]
+    filterset_fields = ['is_active']
 
     def get_queryset(self):
         user = self.request.user
@@ -279,14 +280,45 @@ class UnitsViewSet(viewsets.ModelViewSet):
             return OlchovBirligi.objects.none()
         
         biznes = user.xodim.biznes
-        return OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
+        if getattr(self, 'action', None) in ['destroy', 'retrieve', 'update', 'partial_update']:
+            return OlchovBirligi.objects.filter(biznes=biznes)
+
+        queryset = OlchovBirligi.objects.filter(biznes=biznes).order_by('id')
+
+        is_active_param = self.request.query_params.get('is_active')
+        archive_param = self.request.query_params.get('archive')
+        if is_active_param is not None:
+            val = is_active_param.lower() in ('true', '1', 'yes', 't')
+            queryset = queryset.filter(is_active=val)
+        elif archive_param is not None:
+            val = archive_param.lower() in ('true', '1', 'yes', 't')
+            queryset = queryset.filter(is_active=not val)
+        else:
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
 
     def perform_create(self, serializer):
         serializer.save(biznes=self.request.user.xodim.biznes)
 
-    def perform_destroy(self, instance):
-        instance.mahsulotlar.update(olchov_birligi=None)
-        instance.delete()
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "O'lchov birligi muvaffaqiyatli arxivlandi."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        user = request.user
+        base_qs = OlchovBirligi.objects.all()
+        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes and not user.is_superuser:
+            base_qs = base_qs.filter(biznes=user.xodim.biznes)
+        instance = base_qs.filter(pk=pk).first()
+        if not instance:
+            return Response({"detail": "O'lchov birligi topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+        instance.is_active = True
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "O'lchov birligi muvaffaqiyatli tiklandi."}, status=status.HTTP_200_OK)
 
 
 class RolesViewSet(viewsets.ModelViewSet):
@@ -451,5 +483,44 @@ class ArchiveListAPIView(APIView):
                 "holat": "O'chirilgan",
                 "status": "O'chirilgan"
             })
+
+        # Inactive Units (O'lchov birliklari)
+        units = OlchovBirligi.objects.filter(is_active=False).order_by('-yangilangan_vaqt')
+        if user.is_superuser:
+            pass
+        elif biznes:
+            units = units.filter(biznes=biznes)
+        else:
+            units = units.none()
+
+        if search:
+            from django.db import models
+            units = units.filter(models.Q(nomi__icontains=search) | models.Q(short_name__icontains=search))
+
+        for u in units:
+            archive_items.append({
+                "id": u.id,
+                "tur": "O'lchov birligi",
+                "type": "O'lchov birligi",
+                "nomi": u.nomi,
+                "name": u.nomi,
+                "sana": u.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if u.yangilangan_vaqt else "",
+                "date": u.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if u.yangilangan_vaqt else "",
+                "holat": "O'chirilgan",
+                "status": "O'chirilgan"
+            })
+
+        tur_param = (request.query_params.get('tur') or request.query_params.get('type') or request.query_params.get('entity') or '').lower()
+        if tur_param:
+            if tur_param in ['mahsulot', 'product', 'products']:
+                archive_items = [i for i in archive_items if i.get('tur') == 'Mahsulot']
+            elif tur_param in ['taminotchi', 'supplier', 'suppliers', 'taminotchilar']:
+                archive_items = [i for i in archive_items if i.get('tur') == "Ta'minotchi"]
+            elif tur_param in ['kategoriya', 'category', 'categories', 'kategoriyalar']:
+                archive_items = [i for i in archive_items if i.get('tur') == 'Kategoriya']
+            elif tur_param in ['brend', 'brand', 'brands', 'brendlar']:
+                archive_items = [i for i in archive_items if i.get('tur') == 'Brend']
+            elif tur_param in ['olchov', 'unit', 'units', 'olchov_birligi', 'olchov_birliklari', 'olchov-birliklari']:
+                archive_items = [i for i in archive_items if i.get('tur') == "O'lchov birligi"]
 
         return Response(archive_items, status=status.HTTP_200_OK)

@@ -1268,6 +1268,7 @@ class OlchovBirligi(BaseModel):
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='olchov_birliklari', null=True, blank=True)
     nomi = models.CharField(max_length=255)
     short_name = models.CharField(max_length=50, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.nomi

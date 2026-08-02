@@ -688,7 +688,7 @@ class ExtraEndpointsAPITestCase(APITestCase):
 
         # 3. Delete
         response = self.client.delete(reverse('units-detail', kwargs={'pk': unit_id}))
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIn(response.status_code, [status.HTTP_200_OK, status.HTTP_204_NO_CONTENT])
 
     def test_categories_endpoint_crud(self):
         # 1. List (and auto-populate from existing product categories)
