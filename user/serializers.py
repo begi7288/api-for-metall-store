@@ -268,18 +268,21 @@ class LoginSerializer(serializers.Serializer):
         elif 'phone' in data and not data.get('telefon_raqam'):
             data['telefon_raqam'] = data['phone']
 
-        if 'password' in data and not data.get('parol'):
-            data['parol'] = data['password']
-        elif 'pin_kod' in data and not data.get('parol'):
-            data['parol'] = data['pin_kod']
-        elif 'pin_code' in data and not data.get('parol'):
-            data['parol'] = data['pin_code']
-        elif 'pin' in data and not data.get('parol'):
-            data['parol'] = data['pin']
+        pin_alias_keys = ['password', 'pin_kod', 'pin_code', 'pinCode', 'pin', 'pincode', 'code', 'passcode', 'parol']
+        for k in pin_alias_keys:
+            if k in data and data.get(k) is not None and str(data.get(k)).strip() != '':
+                data['parol'] = str(data[k]).strip()
+                break
 
         ret = super().to_internal_value(data)
 
-        parol_val = ret.get('parol') or data.get('pin_kod') or data.get('pin_code') or data.get('pin') or data.get('password')
+        parol_val = ret.get('parol')
+        if not parol_val:
+            for k in pin_alias_keys:
+                if k in data and data.get(k) is not None and str(data.get(k)).strip() != '':
+                    parol_val = str(data[k]).strip()
+                    break
+
         if not parol_val:
             raise serializers.ValidationError({'parol': "Parol yoki PIN-kod kiritilishi shart."})
 

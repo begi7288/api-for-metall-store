@@ -1143,6 +1143,37 @@ class PinLoginAPITest(APITestCase):
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_pin_login_with_pinCode_alias_and_int(self):
+        url = reverse('login')
+        response = self.client.post(url, {
+            'pinCode': 5555
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['ism'], 'Botir')
+
+    def test_pin_login_without_django_user_auto_creates_user(self):
+        xodim_no_user = Xodim.objects.create(
+            biznes=self.biznes,
+            ism="Sardor",
+            familiya="Test",
+            telefon_raqam="+998909998877",
+            parol="Pass123!",
+            pin_kod="7777",
+            rol="sotuvchi",
+            jinsi="erkak"
+        )
+        xodim_no_user.user = None
+        xodim_no_user.save(update_fields=['user'])
+
+        url = reverse('login')
+        response = self.client.post(url, {
+            'pin': '7777'
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['ism'], 'Sardor')
+
 
 
 
