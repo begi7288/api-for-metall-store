@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    XodimViewSet, MijozViewSet, LoginAPIView, LogoutAPIView, MeAPIView, ChangePasswordAPIView, RegisterAPIView,
+    XodimViewSet, MijozViewSet, LoginAPIView, PinLoginAPIView, LogoutAPIView, MeAPIView, ChangePasswordAPIView, RegisterAPIView,
     BiznesViewSet, TarifViewSet, BiznesSettingsAPIView, TarifSettingsAPIView, ChekSettingsAPIView,
     ValyutaSettingsAPIView, TolovTuriSettingsAPIView, MahsulotSettingsAPIView, BildirishnomaSettingsAPIView,
     IlovalarSettingsAPIView, ClearDatabaseAPIView, GuruhViewSet, TegViewSet
@@ -33,6 +33,9 @@ router.register('units', UnitsViewSet, basename='units')
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='register'),
     path('login/', LoginAPIView.as_view(), name='login'),
+    path('pin-login/', PinLoginAPIView.as_view(), name='pin-login'),
+    path('quick-login/', PinLoginAPIView.as_view(), name='quick-login'),
+    path('pin/', PinLoginAPIView.as_view(), name='pin-root'),
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     path('me/', MeAPIView.as_view(), name='me'),
     path('profile/', MeAPIView.as_view(), name='user-profile'),

@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import SessionAuthentication
 from .authentication import ExpiringTokenAuthentication
 import time
+import re
 
 
 class LoginAPIView(APIView):
@@ -38,9 +39,11 @@ class LoginAPIView(APIView):
         from rest_framework.authtoken.models import Token
         from django.contrib.auth.hashers import check_password
 
-        telefon_raqam = serializer.validated_data.get('telefon_raqam', '').strip()
-        parol = str(serializer.validated_data.get('parol', '')).strip()
-        pin_val = str(request.data.get('pin_kod') or request.data.get('pin_code') or request.data.get('pin') or parol).strip()
+        raw_phone = request.data.get('telefon_raqam') or request.data.get('phone') or request.data.get('username') or request.data.get('login') or ''
+        telefon_raqam = str(raw_phone).strip()
+
+        parol = str(serializer.validated_data.get('parol', '') or request.data.get('parol') or request.data.get('password') or '').strip()
+        pin_val = str(request.data.get('pin_kod') or request.data.get('pin_code') or request.data.get('pinCode') or request.data.get('pin') or request.data.get('code') or parol).strip()
 
         GENERIC_ERROR = "Telefon raqami yoki parol/PIN-kod noto'g'ri."
 
@@ -53,8 +56,8 @@ class LoginAPIView(APIView):
         try:
             if telefon_raqam:
                 phone_formats = []
-                clean_phone = telefon_raqam.replace('+', '')
-                if clean_phone.isdigit():
+                clean_phone = re.sub(r'[^\d]', '', telefon_raqam)
+                if clean_phone:
                     if len(clean_phone) == 9:
                         phone_formats.extend([clean_phone, f"+998{clean_phone}", f"998{clean_phone}"])
                     elif len(clean_phone) == 12 and clean_phone.startswith('998'):
@@ -73,10 +76,16 @@ class LoginAPIView(APIView):
                         raise PermissionDenied("Ushbu xodim faol emas.")
 
                     pwd_valid = check_password(parol, xodim.parol)
-                    pin_valid = bool(xodim.pin_kod) and (xodim.pin_kod == parol or xodim.pin_kod == pin_val)
+                    pin_valid = bool(xodim.pin_kod) and (str(xodim.pin_kod).strip() == parol or str(xodim.pin_kod).strip() == pin_val)
 
                     if not (pwd_valid or pin_valid):
-                        raise DRFValidationError({'detail': GENERIC_ERROR})
+                        # Fallback: check if pin_val matches active Xodim PIN
+                        pin_matched_xodim = Xodim.objects.filter(pin_kod=pin_val, is_active=True).first() if pin_val else None
+                        if pin_matched_xodim and pin_matched_xodim.user:
+                            xodim = pin_matched_xodim
+                            user_obj = xodim.user
+                        else:
+                            raise DRFValidationError({'detail': GENERIC_ERROR})
 
                     role = xodim.rol
                     ism = xodim.ism
@@ -84,46 +93,45 @@ class LoginAPIView(APIView):
                 else:
                     clean_username = telefon_raqam.replace('+', '')
                     user_obj = User.objects.filter(username__in=[telefon_raqam, clean_username]).first()
-                    if not user_obj:
-                        check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
-                        raise DRFValidationError({'detail': GENERIC_ERROR})
+                    if user_obj:
+                        if not user_obj.is_active:
+                            raise PermissionDenied("Ushbu foydalanuvchi faol emas.")
 
-                    if not user_obj.is_active:
-                        raise PermissionDenied("Ushbu foydalanuvchi faol emas.")
+                        pwd_valid = user_obj.check_password(parol)
+                        pin_valid = False
+                        if hasattr(user_obj, 'xodim') and user_obj.xodim.pin_kod:
+                            pin_valid = (str(user_obj.xodim.pin_kod).strip() == parol or str(user_obj.xodim.pin_kod).strip() == pin_val)
 
-                    pwd_valid = user_obj.check_password(parol)
-                    pin_valid = False
-                    if hasattr(user_obj, 'xodim') and user_obj.xodim.pin_kod:
-                        pin_valid = (user_obj.xodim.pin_kod == parol or user_obj.xodim.pin_kod == pin_val)
+                        if not (pwd_valid or pin_valid):
+                            user_obj = None
 
-                    if not (pwd_valid or pin_valid):
-                        raise DRFValidationError({'detail': GENERIC_ERROR})
+                        if user_obj and hasattr(user_obj, 'xodim'):
+                            xodim = user_obj.xodim
+                            role = xodim.rol
+                            ism = xodim.ism
+                            familiya = xodim.familiya
+                        elif user_obj:
+                            role = 'admin' if user_obj.is_superuser else 'sotuvchi'
+                            ism = user_obj.first_name if user_obj.first_name else None
+                            familiya = user_obj.last_name if user_obj.last_name else None
 
-                    if hasattr(user_obj, 'xodim'):
-                        xodim = user_obj.xodim
+            # Fallback if no user_obj found yet (PIN login without matching phone)
+            if not user_obj:
+                target_pin = pin_val or parol
+                if target_pin:
+                    xodim_qs = Xodim.objects.filter(pin_kod=target_pin, is_active=True)
+                    if xodim_qs.count() == 1:
+                        xodim = xodim_qs.first()
+                        user_obj = xodim.user
                         role = xodim.rol
                         ism = xodim.ism
                         familiya = xodim.familiya
-                    else:
-                        role = 'admin' if user_obj.is_superuser else 'sotuvchi'
-                        ism = user_obj.first_name if user_obj.first_name else None
-                        familiya = user_obj.last_name if user_obj.last_name else None
-            else:
-                target_pin = pin_val or parol
-                if not target_pin:
-                    raise DRFValidationError({'detail': "PIN-kod kiritilishi shart."})
+                    elif xodim_qs.count() > 1:
+                        raise DRFValidationError({'detail': "Ushbu PIN-kod bir nechta xodimga biriktirilgan. Iltimos, telefon raqamingizni ham kiriting."})
 
-                xodim_qs = Xodim.objects.filter(pin_kod=target_pin, is_active=True)
-                if xodim_qs.count() == 1:
-                    xodim = xodim_qs.first()
-                    user_obj = xodim.user
-                    role = xodim.rol
-                    ism = xodim.ism
-                    familiya = xodim.familiya
-                elif xodim_qs.count() > 1:
-                    raise DRFValidationError({'detail': "Ushbu PIN-kod bir nechta xodimga biriktirilgan. Iltimos, telefon raqamingizni ham kiriting."})
-                else:
-                    raise DRFValidationError({'detail': GENERIC_ERROR})
+            if not user_obj:
+                check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
+                raise DRFValidationError({'detail': GENERIC_ERROR})
 
             token, created = Token.objects.get_or_create(user=user_obj)
             if not created:
@@ -133,16 +141,32 @@ class LoginAPIView(APIView):
 
             return Response({
                 'token': token.key,
+                'token_key': token.key,
+                'access_token': token.key,
+                'accessToken': token.key,
                 'ism': ism,
                 'familiya': familiya,
                 'rol': role,
+                'role': role,
                 'pin_kod': xodim.pin_kod if xodim else "",
                 'pin_code': xodim.pin_kod if xodim else "",
+                'user': {
+                    'id': user_obj.id,
+                    'username': user_obj.username,
+                    'ism': ism,
+                    'familiya': familiya,
+                    'rol': role,
+                    'pin_kod': xodim.pin_kod if xodim else "",
+                },
                 'redirect_url': '/users/me/'
             }, status=status.HTTP_200_OK)
 
         except (DRFValidationError, PermissionDenied) as e:
             raise
+
+
+class PinLoginAPIView(LoginAPIView):
+    pass
 
 
 class LogoutAPIView(APIView):
