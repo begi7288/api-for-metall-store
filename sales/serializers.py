@@ -63,11 +63,29 @@ class SaleSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         return '0.00'
 
     def validate(self, attrs):
-        # If creating or updating status to completed
         holat = attrs.get('holat', self.instance.holat if self.instance else 'yakunlangan')
         elementlar_data = attrs.get('elementlar', [])
         dokon = attrs.get('dokon', self.instance.dokon if self.instance else None)
-        
+        mijoz = attrs.get('mijoz', self.instance.mijoz if self.instance else None)
+        tolov_usuli = attrs.get('tolov_usuli', self.instance.tolov_usuli if self.instance else 'naqd')
+        nasiya_summa = attrs.get('nasiya_summa', self.instance.nasiya_summa if self.instance else Decimal('0.00'))
+
+        # Check customer selection for nasiya / debt when completing sale
+        if holat == 'yakunlangan' and tolov_usuli == 'nasiya' and (nasiya_summa and Decimal(str(nasiya_summa)) > 0):
+            if not mijoz:
+                raise serializers.ValidationError({
+                    'mijoz': "Nasiya to'lovini amalga oshirish uchun mijoz tanlanishi shart."
+                })
+
+        # Check if customer validation is explicitly requested in payload
+        request = self.context.get('request')
+        if request and hasattr(request, 'data') and isinstance(request.data, dict):
+            if request.data.get('require_customer') or request.data.get('mijoz_shart') or request.data.get('check_customer'):
+                if not mijoz:
+                    raise serializers.ValidationError({
+                        'mijoz': "To'lovni amalga oshirish uchun mijoz tanlanishi shart."
+                    })
+
         if holat == 'yakunlangan':
             # Check stock for each item
             for item_data in elementlar_data:
