@@ -59,7 +59,7 @@ class Mahsulot(BaseModel):
     ogohlantirish = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     toifa = models.CharField(max_length=100, blank=True, null=True, default="Mavjud emas")
-    brend = models.CharField(max_length=100, blank=True, null=True, default="Mavjud emas")
+    brend = models.ForeignKey('MahsulotBrend', on_delete=models.SET_NULL, related_name='mahsulotlar', null=True, blank=True)
     taminotchi = models.ForeignKey('Taminotchi', on_delete=models.SET_NULL, null=True, blank=True, related_name='mahsulotlar')
     erkin_narx = models.BooleanField(default=False)
     ulgurji_narx = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), blank=True, null=True)
@@ -70,11 +70,17 @@ class Mahsulot(BaseModel):
         if 'olchov_birligi' in kwargs and isinstance(kwargs['olchov_birligi'], str):
             val = kwargs.pop('olchov_birligi')
             self._temp_olchov_birligi = val
+        if 'brend' in kwargs and isinstance(kwargs['brend'], str):
+            val = kwargs.pop('brend')
+            self._temp_brend = val
         super().__init__(*args, **kwargs)
 
     def __setattr__(self, name, value):
         if name == 'olchov_birligi' and isinstance(value, str):
             self._temp_olchov_birligi = value
+            return
+        if name == 'brend' and isinstance(value, str):
+            self._temp_brend = value
             return
         super().__setattr__(name, value)
 
@@ -82,13 +88,34 @@ class Mahsulot(BaseModel):
         if hasattr(self, '_temp_olchov_birligi'):
             val = getattr(self, '_temp_olchov_birligi')
             from products.models import OlchovBirligi
-            unit_obj, created = OlchovBirligi.objects.get_or_create(
-                biznes=self.biznes,
-                short_name=val.lower().strip(),
-                defaults={'nomi': val.capitalize()}
-            )
+            val_clean = str(val).strip().lower()
+            qs = OlchovBirligi.objects.filter(biznes=self.biznes) if self.biznes else OlchovBirligi.objects.all()
+            unit_obj = qs.filter(short_name__iexact=val_clean).first() or qs.filter(nomi__iexact=str(val).strip()).first()
+            if not unit_obj:
+                unit_obj, _ = OlchovBirligi.objects.get_or_create(
+                    biznes=self.biznes,
+                    short_name=val_clean,
+                    defaults={'nomi': str(val).strip().capitalize()}
+                )
             self.olchov_birligi = unit_obj
             delattr(self, '_temp_olchov_birligi')
+
+        if hasattr(self, '_temp_brend'):
+            val = getattr(self, '_temp_brend')
+            from products.models import MahsulotBrend
+            if val and str(val).strip() and str(val).strip() != "Mavjud emas":
+                val_clean = str(val).strip()
+                qs = MahsulotBrend.objects.filter(biznes=self.biznes) if self.biznes else MahsulotBrend.objects.all()
+                brand_obj = qs.filter(nomi__iexact=val_clean).first()
+                if not brand_obj:
+                    brand_obj, _ = MahsulotBrend.objects.get_or_create(
+                        biznes=self.biznes,
+                        nomi=val_clean
+                    )
+                self.brend = brand_obj
+            else:
+                self.brend = None
+            delattr(self, '_temp_brend')
 
         super().clean()
 
@@ -119,17 +146,39 @@ class Mahsulot(BaseModel):
         if hasattr(self, '_temp_olchov_birligi'):
             val = getattr(self, '_temp_olchov_birligi')
             from products.models import OlchovBirligi
-            unit_obj, created = OlchovBirligi.objects.get_or_create(
-                biznes=self.biznes,
-                short_name=val.lower().strip(),
-                defaults={'nomi': val.capitalize()}
-            )
+            val_clean = str(val).strip().lower()
+            qs = OlchovBirligi.objects.filter(biznes=self.biznes) if self.biznes else OlchovBirligi.objects.all()
+            unit_obj = qs.filter(short_name__iexact=val_clean).first() or qs.filter(nomi__iexact=str(val).strip()).first()
+            if not unit_obj:
+                unit_obj, _ = OlchovBirligi.objects.get_or_create(
+                    biznes=self.biznes,
+                    short_name=val_clean,
+                    defaults={'nomi': str(val).strip().capitalize()}
+                )
             self.olchov_birligi = unit_obj
             delattr(self, '_temp_olchov_birligi')
 
+        if hasattr(self, '_temp_brend'):
+            val = getattr(self, '_temp_brend')
+            from products.models import MahsulotBrend
+            if val and str(val).strip() and str(val).strip() != "Mavjud emas":
+                val_clean = str(val).strip()
+                qs = MahsulotBrend.objects.filter(biznes=self.biznes) if self.biznes else MahsulotBrend.objects.all()
+                brand_obj = qs.filter(nomi__iexact=val_clean).first()
+                if not brand_obj:
+                    brand_obj, _ = MahsulotBrend.objects.get_or_create(
+                        biznes=self.biznes,
+                        nomi=val_clean
+                    )
+                self.brend = brand_obj
+            else:
+                self.brend = None
+            delattr(self, '_temp_brend')
+
         is_new = not self.pk
         super().save(*args, **kwargs)
-        if is_new:
+        if is_new and not kwargs.get('raw', False):
+
             custom_barcodes = getattr(self, '_custom_barcodes', None)
             if custom_barcodes:
                 for code in custom_barcodes:
@@ -635,8 +684,9 @@ class Import(BaseModel):
 
 class Dokon(BaseModel):
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='dokonlar', null=True, blank=True)
-    nomi = models.CharField(max_length=255, unique=True)
+    nomi = models.CharField(max_length=255)
     tavsif = models.TextField(blank=True, null=True)
+
 
     def __str__(self):
         return self.nomi
@@ -937,8 +987,10 @@ class Taminotchi(BaseModel):
     bank_nomi_filiali = models.CharField(max_length=255, blank=True, null=True)
     inn = models.CharField(max_length=50, blank=True, null=True)
     mfo = models.CharField(max_length=50, blank=True, null=True)
+    fayl = models.FileField(upload_to='taminotchilar/', null=True, blank=True)
 
     balans = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'))
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.nomi
@@ -1206,6 +1258,7 @@ class YorliqShablon(BaseModel):
 class MahsulotToifasi(BaseModel):
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='toifalar', null=True, blank=True)
     nomi = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.nomi
@@ -1217,4 +1270,16 @@ class OlchovBirligi(BaseModel):
     short_name = models.CharField(max_length=50, blank=True, null=True)
 
     def __str__(self):
-        return self.nomi
+        return self.nomi
+
+
+class MahsulotBrend(BaseModel):
+    biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='brendlar', null=True, blank=True)
+    nomi = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.nomi
+
+
+Brend = MahsulotBrend

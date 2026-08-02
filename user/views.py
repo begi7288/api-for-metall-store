@@ -611,7 +611,7 @@ class MijozViewSet(viewsets.ModelViewSet):
     serializer_class = MijozSerializer
     permission_classes = [IsEmployee]
     filterset_fields = ['jinsi']
-    search_fields = ['ism', 'familiya', 'otasining_ismi', 'telefon_raqam_1', 'telefon_raqam_2', 'manzil', 'guruhlar', 'teglar']
+    search_fields = ['ism', 'familiya', 'otasining_ismi', 'telefon_raqam_1', 'telefon_raqam_2', 'manzil']
     ordering_fields = ['ism', 'familiya', 'yaratilgan_vaqt']
 
     def get_queryset(self):
@@ -628,14 +628,6 @@ class MijozViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(biznes=user.xodim.biznes)
             else:
                 return queryset.none()
-
-        guruh = self.request.query_params.get('guruh') or self.request.query_params.get('guruhlar')
-        if guruh:
-            queryset = queryset.filter(guruhlar__icontains=guruh)
-
-        teg = self.request.query_params.get('teg') or self.request.query_params.get('teglar')
-        if teg:
-            queryset = queryset.filter(teglar__icontains=teg)
 
         xaridlar = self.request.query_params.get('xaridlar')
         if xaridlar in ['xarid_qilgan', 'qilgan', 'yes', 'true', '1']:
@@ -682,11 +674,6 @@ class MijozViewSet(viewsets.ModelViewSet):
         seven_days_ago = timezone.now() - timedelta(days=7)
         otgan_hafta = base_qs.filter(yaratilgan_vaqt__gte=seven_days_ago).count()
 
-        thirty_days_ago = timezone.now() - timedelta(days=30)
-        qaytib_kelmaydiganlar = base_qs.filter(sotuvlar__holat='yakunlangan').annotate(
-            oxirgi_sana=Max('sotuvlar__yaratilgan_vaqt')
-        ).filter(oxirgi_sana__lt=thirty_days_ago).distinct().count()
-
         today = timezone.now().date()
         tugilgan_kunlar = base_qs.filter(
             tugilgan_sana__month=today.month,
@@ -696,9 +683,152 @@ class MijozViewSet(viewsets.ModelViewSet):
         return Response({
             'jami_mijozlar': jami_mijozlar,
             'otgan_hafta': otgan_hafta,
-            'qaytib_kelmaydiganlar': qaytib_kelmaydiganlar,
             'tugilgan_kunlar': tugilgan_kunlar,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'])
+    def card(self, request, pk=None):
+        mijoz = self.get_object()
+        serializer = self.get_serializer(mijoz)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'])
+    def kartochka(self, request, pk=None):
+        return self.card(request, pk=pk)
+
+    @action(detail=True, methods=['get'], url_path='detail-card')
+    def detail_card(self, request, pk=None):
+        return self.card(request, pk=pk)
+
+    @action(detail=True, methods=['post'])
+    def pay(self, request, pk=None):
+        from user.models import MijozTolovi, MijozQarzi
+        from decimal import Decimal
+
+        mijoz = self.get_object()
+        summa_str = request.data.get('summa') or request.data.get('amount') or '0'
+        tolov_usuli = request.data.get('tolov_usuli') or request.data.get('payment_method') or 'naqd'
+        eslatma = request.data.get('eslatma') or request.data.get('notes') or ''
+
+        try:
+            summa = Decimal(str(summa_str))
+        except Exception:
+            return Response({"detail": "Summa noto'g'ri kiritilgan."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if summa <= 0:
+            return Response({"detail": "To'lov summasi 0 dan katta bo'lishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+
+        xodim = request.user.xodim if (request.user.is_authenticated and hasattr(request.user, 'xodim')) else None
+        biznes = mijoz.biznes
+
+        # Settle active customer debts
+        active_debts = MijozQarzi.objects.filter(mijoz=mijoz).exclude(holat='tolangan').order_by('yaratilgan_vaqt')
+        remaining = summa
+        for qarz in active_debts:
+            if remaining <= 0:
+                break
+            needed = qarz.qoldiq_summa
+            if remaining >= needed:
+                qarz.tolangan_summa += needed
+                qarz.qoldiq_summa = Decimal('0.00')
+                qarz.holat = 'tolangan'
+                remaining -= needed
+            else:
+                qarz.tolangan_summa += remaining
+                qarz.qoldiq_summa -= remaining
+                qarz.holat = 'qisman_tolangan'
+                remaining = Decimal('0.00')
+            qarz.save()
+
+        payment = MijozTolovi.objects.create(
+            biznes=biznes,
+            mijoz=mijoz,
+            summa=summa,
+            tolov_usuli=tolov_usuli,
+            xodim=xodim,
+            eslatma=eslatma
+        )
+
+        return Response({
+            "detail": "To'lov qabul qilindi",
+            "payment_id": payment.id,
+            "yigilgan_qarz": mijoz.qarz_summasi,
+            "qarz_summasi": mijoz.qarz_summasi
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def tolov(self, request, pk=None):
+        return self.pay(request, pk=pk)
+
+    @action(detail=False, methods=['post'], url_path='bulk-pay')
+    def bulk_pay(self, request):
+        from user.models import Mijoz, MijozTolovi, MijozQarzi
+        from decimal import Decimal
+
+        payments_data = request.data.get('tolovlar') or request.data.get('payments') or request.data
+        if not isinstance(payments_data, list):
+            payments_data = [request.data]
+
+        results = []
+        xodim = request.user.xodim if (request.user.is_authenticated and hasattr(request.user, 'xodim')) else None
+
+        for item in payments_data:
+            mijoz_id = item.get('mijoz_id') or item.get('customer_id') or item.get('mijoz')
+            summa_str = item.get('summa') or item.get('amount') or '0'
+            tolov_usuli = item.get('tolov_usuli') or item.get('payment_method') or 'naqd'
+            eslatma = item.get('eslatma') or item.get('notes') or ''
+
+            if not mijoz_id:
+                continue
+            mijoz = Mijoz.objects.filter(id=mijoz_id).first()
+            if not mijoz:
+                continue
+
+            try:
+                summa = Decimal(str(summa_str))
+            except Exception:
+                continue
+            if summa <= 0:
+                continue
+
+            active_debts = MijozQarzi.objects.filter(mijoz=mijoz).exclude(holat='tolangan').order_by('yaratilgan_vaqt')
+            remaining = summa
+            for qarz in active_debts:
+                if remaining <= 0:
+                    break
+                needed = qarz.qoldiq_summa
+                if remaining >= needed:
+                    qarz.tolangan_summa += needed
+                    qarz.qoldiq_summa = Decimal('0.00')
+                    qarz.holat = 'tolangan'
+                    remaining -= needed
+                else:
+                    qarz.tolangan_summa += remaining
+                    qarz.qoldiq_summa -= remaining
+                    qarz.holat = 'qisman_tolangan'
+                    remaining = Decimal('0.00')
+                qarz.save()
+
+            payment = MijozTolovi.objects.create(
+                biznes=mijoz.biznes,
+                mijoz=mijoz,
+                summa=summa,
+                tolov_usuli=tolov_usuli,
+                xodim=xodim,
+                eslatma=eslatma
+            )
+            results.append({
+                "mijoz_id": mijoz.id,
+                "payment_id": payment.id,
+                "tolangan_summa": str(summa),
+                "qarz_summasi": mijoz.qarz_summasi
+            })
+
+        return Response({"detail": "Ommaviy to'lovlar amalga oshirildi", "results": results}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='ommaviy-tolov')
+    def ommaviy_tolov(self, request):
+        return self.bulk_pay(request)
 
 
 class BiznesViewSet(viewsets.ModelViewSet):
@@ -865,6 +995,9 @@ class ChekSettingsAPIView(APIView):
             }
         }
         return Response(data, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        return self.patch(request, *args, **kwargs)
 
     def put(self, request, *args, **kwargs):
         return self.patch(request, *args, **kwargs)

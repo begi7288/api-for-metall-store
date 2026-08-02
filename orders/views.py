@@ -7,26 +7,7 @@ from user.permissions import IsEmployee
 from .models import Taminotchi, SupplierOrder, SupplierOrderReturn
 from .serializers import TaminotchiSerializer, SupplierOrderSerializer, SupplierOrderReturnSerializer
 
-class TaminotchiViewSet(viewsets.ModelViewSet):
-    serializer_class = TaminotchiSerializer
-    permission_classes = [IsEmployee]
-    search_fields = ['id', 'nomi', 'telefon_raqam']
-    ordering_fields = ['nomi']
-
-    def get_queryset(self):
-        user = self.request.user
-        queryset = Taminotchi.objects.all().order_by('-yaratilgan_vaqt')
-        if user.is_superuser:
-            return queryset
-        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
-            return queryset.filter(biznes=user.xodim.biznes)
-        return queryset.none()
-
-    def perform_create(self, serializer):
-        biznes = None
-        if self.request.user and hasattr(self.request.user, 'xodim'):
-            biznes = self.request.user.xodim.biznes
-        serializer.save(biznes=biznes)
+from products.views.taminotchi import TaminotchiViewSet
 
 import django_filters
 from django.db import models

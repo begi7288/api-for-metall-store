@@ -6,8 +6,10 @@ from .views import (
     ValyutaSettingsAPIView, TolovTuriSettingsAPIView, MahsulotSettingsAPIView, BildirishnomaSettingsAPIView,
     IlovalarSettingsAPIView, ClearDatabaseAPIView, GuruhViewSet, TegViewSet
 )
-from user.extra_views import RolesViewSet, CategoriesViewSet, UnitsViewSet
+from user.extra_views import RolesViewSet, CategoriesViewSet, UnitsViewSet, BrandsViewSet
 from products.views.taminotchi import TaminotchiViewSet
+
+from user.sync_views import SyncPullAPIView, SyncPushAPIView, SyncRestoreAPIView, SyncStatusAPIView
 
 router = DefaultRouter()
 router.register('biznes', BiznesViewSet, basename='biznes')
@@ -23,6 +25,9 @@ router.register('lavozimlar', RolesViewSet, basename='lavozimlar')
 router.register('kategoriya', CategoriesViewSet, basename='kategoriya')
 router.register('kategoriyalar', CategoriesViewSet, basename='kategoriyalar')
 router.register('categories', CategoriesViewSet, basename='categories')
+router.register('brend', BrandsViewSet, basename='brend')
+router.register('brendlar', BrandsViewSet, basename='brendlar')
+router.register('brands', BrandsViewSet, basename='brands')
 router.register('taminotchi', TaminotchiViewSet, basename='taminotchi')
 router.register('taminotchilar', TaminotchiViewSet, basename='taminotchilar')
 router.register('suppliers', TaminotchiViewSet, basename='suppliers')
@@ -64,5 +69,9 @@ urlpatterns = [
     path('loyalty/', include('user.loyalty_urls')),
     path('sodiqlik/', include('user.loyalty_urls')),
     path('clear-database/', ClearDatabaseAPIView.as_view(), name='clear-database'),
+    path('sync/pull/', SyncPullAPIView.as_view(), name='sync-pull'),
+    path('sync/push/', SyncPushAPIView.as_view(), name='sync-push'),
+    path('sync/restore/', SyncRestoreAPIView.as_view(), name='sync-restore'),
+    path('sync/status/', SyncStatusAPIView.as_view(), name='sync-status'),
     path('', include(router.urls)),
 ]

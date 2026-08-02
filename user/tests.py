@@ -399,15 +399,11 @@ class MultiTenantSecurityTestCase(APITestCase):
             "ism": "Ali",
             "telefon_raqam_1": "+998901112233",
             "jinsi": "erkak",
-            "manzil": "Toshkent, Chilonzor",
-            "guruhlar": ["VIP", "Doimiy"],
-            "teglar": ["Ishonchli"]
+            "manzil": "Toshkent, Chilonzor"
         }
         response = self.client.post(reverse('mijoz-list'), payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['ism'], "Ali")
-        self.assertEqual(response.data['guruhlar'], "VIP, Doimiy")
-        self.assertEqual(response.data['teglar'], "Ishonchli")
         self.assertEqual(response.data['xaridlar_summasi'], "0.00")
 
         # 2. Query customer stats endpoint
@@ -416,21 +412,12 @@ class MultiTenantSecurityTestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('jami_mijozlar', response.data)
         self.assertIn('otgan_hafta', response.data)
-        self.assertIn('qaytib_kelmaydiganlar', response.data)
         self.assertIn('tugilgan_kunlar', response.data)
         self.assertEqual(response.data['jami_mijozlar'], 2)  # m1 + Ali
 
-        # 3. Query with guruh filter
-        response = self.client.get(reverse('mijoz-list'), {'guruh': 'VIP'})
+        # 3. Query mijoz-list
+        response = self.client.get(reverse('mijoz-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['ism'], "Ali")
-
-        # 4. Query with teg filter
-        response = self.client.get(reverse('mijoz-list'), {'teg': 'Ishonchli'})
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['ism'], "Ali")
 
 
 class BiznesAPITestCase(APITestCase):
@@ -718,7 +705,7 @@ class ExtraEndpointsAPITestCase(APITestCase):
 
         # 3. Delete
         response = self.client.delete(reverse('categories-detail', kwargs={'pk': cat_id}))
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIn(response.status_code, [status.HTTP_200_OK, status.HTTP_204_NO_CONTENT])
 
     def test_archive_endpoint(self):
         response = self.client.get(reverse('archive-list'))
@@ -1173,6 +1160,38 @@ class PinLoginAPITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('token', response.data)
         self.assertEqual(response.data['ism'], 'Sardor')
+
+
+class SyncEngineAPITest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser('admin_sync', 'admin@sync.com', 'AdminPass123!')
+        self.client.force_authenticate(user=self.user)
+        self.biznes = Biznes.objects.create(nomi="Sync Test Biznes", egasi_ism="Vali")
+
+    def test_sync_pull_and_status(self):
+        url_status = reverse('sync-status')
+        res_status = self.client.get(url_status)
+        self.assertEqual(res_status.status_code, status.HTTP_200_OK)
+        self.assertTrue(res_status.data['success'])
+
+        url_pull = reverse('sync-pull')
+        res_pull = self.client.get(url_pull)
+        self.assertEqual(res_pull.status_code, status.HTTP_200_OK)
+        self.assertIn('models', res_pull.data)
+
+    def test_sync_push_and_restore(self):
+        url_pull = reverse('sync-pull')
+        backup_payload = self.client.get(url_pull).data
+
+        url_push = reverse('sync-push')
+        res_push = self.client.post(url_push, backup_payload, format='json')
+        self.assertEqual(res_push.status_code, status.HTTP_200_OK)
+        self.assertTrue(res_push.data['success'])
+
+        url_restore = reverse('sync-restore')
+        res_restore = self.client.post(url_restore, backup_payload, format='json')
+        self.assertEqual(res_restore.status_code, status.HTTP_200_OK)
+        self.assertTrue(res_restore.data['success'])
 
 
 

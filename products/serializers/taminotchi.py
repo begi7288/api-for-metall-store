@@ -25,8 +25,13 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     tolovlar_summasi = serializers.SerializerMethodField()
     tovarlar_soni = serializers.SerializerMethodField()
 
+    hujjat = serializers.FileField(source='fayl', required=False, allow_null=True)
+    hujjatlar = serializers.FileField(source='fayl', required=False, allow_null=True)
+
     dastlabki_qarz = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, write_only=True)
     dastlabkiQarz = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, write_only=True)
+    boshlangich_qarz = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, write_only=True)
+    boshlangichQarz = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, write_only=True)
 
     class Meta:
         model = Taminotchi
@@ -34,11 +39,11 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telRaqami', 'telefon_raqam', 'telefonlar', 'standart_ustama',
             'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'boshliq_nomi', 'boshliqNomi', 'director', 'director_name', 'directorName', 'yuridik_nomi',
             'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
-            'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'balans',
+            'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'fayl', 'hujjat', 'hujjatlar', 'balans', 'is_active',
             'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni',
-            'dastlabki_qarz', 'dastlabkiQarz'
+            'dastlabki_qarz', 'dastlabkiQarz', 'boshlangich_qarz', 'boshlangichQarz', 'yaratilgan_vaqt', 'yangilangan_vaqt'
         ]
-        read_only_fields = ['biznes']
+        read_only_fields = ['biznes', 'balans', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
     def get_oxirgi_qarz(self, obj):
         last_unpaid = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').filter(nasiya_summa__gt=0).order_by('-yaratilgan_vaqt').first()
@@ -89,8 +94,9 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
         val_oxirgi = clean_val(data.get('oxirgi_qarz') or data.get('oxirgiQarz'))
         val_jami = clean_val(data.get('jami_qarz') or data.get('jamiQarz') or data.get('qarz_summasi') or data.get('qarzSummasi'))
+        val_boshlangich = clean_val(data.get('boshlangich_qarz') or data.get('boshlangichQarz'))
         
-        target_val = val_oxirgi or val_jami
+        target_val = val_boshlangich or val_oxirgi or val_jami
         
         if target_val is not None and not data.get('dastlabki_qarz') and not data.get('dastlabkiQarz'):
             if hasattr(data, 'copy'):
@@ -104,8 +110,10 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     def create(self, validated_data):
         dastlabki_qarz = validated_data.pop('dastlabki_qarz', None)
         dastlabki_qarz_camel = validated_data.pop('dastlabkiQarz', None)
+        bosh_qarz = validated_data.pop('boshlangich_qarz', None)
+        bosh_qarz_camel = validated_data.pop('boshlangichQarz', None)
         
-        initial_debt = dastlabki_qarz or dastlabki_qarz_camel or Decimal('0.00')
+        initial_debt = dastlabki_qarz or dastlabki_qarz_camel or bosh_qarz or bosh_qarz_camel or Decimal('0.00')
         
         taminotchi = super().create(validated_data)
         
@@ -135,7 +143,9 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     def update(self, instance, validated_data):
         dastlabki_qarz = validated_data.pop('dastlabki_qarz', None)
         dastlabki_qarz_camel = validated_data.pop('dastlabkiQarz', None)
-        initial_debt = dastlabki_qarz or dastlabki_qarz_camel
+        bosh_qarz = validated_data.pop('boshlangich_qarz', None)
+        bosh_qarz_camel = validated_data.pop('boshlangichQarz', None)
+        initial_debt = dastlabki_qarz if dastlabki_qarz is not None else (dastlabki_qarz_camel if dastlabki_qarz_camel is not None else (bosh_qarz if bosh_qarz is not None else bosh_qarz_camel))
         
         taminotchi = super().update(instance, validated_data)
         

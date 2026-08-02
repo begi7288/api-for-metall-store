@@ -132,33 +132,6 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     familiya = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
     telefon_raqam_2 = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
     manzil = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
-    guruhlar = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
-    teglar = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
-
-    def to_internal_value(self, data):
-        data = data.copy() if hasattr(data, 'copy') else dict(data)
-        if 'guruhlar' in data:
-            val = data['guruhlar']
-            if isinstance(val, list):
-                str_elements = []
-                for x in val:
-                    if isinstance(x, dict):
-                        str_elements.append(str(x.get('nomi') or x.get('name') or ''))
-                    else:
-                        str_elements.append(str(x))
-                data['guruhlar'] = ", ".join([s.strip() for s in str_elements if s.strip()])
-        if 'teglar' in data:
-            val = data['teglar']
-            if isinstance(val, list):
-                str_elements = []
-                for x in val:
-                    if isinstance(x, dict):
-                        str_elements.append(str(x.get('nomi') or x.get('name') or ''))
-                    else:
-                        str_elements.append(str(x))
-                data['teglar'] = ", ".join([s.strip() for s in str_elements if s.strip()])
-        return super().to_internal_value(data)
-
 
     xaridlar_summasi = serializers.SerializerMethodField(read_only=True)
     oxirgi_xarid = serializers.SerializerMethodField(read_only=True)
@@ -169,15 +142,75 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     created_at = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
     phone = serializers.CharField(source='telefon_raqam_1', read_only=True)
 
+    fish = serializers.SerializerMethodField(read_only=True)
+    full_name = serializers.SerializerMethodField(read_only=True)
+    oxirgi_tranzaksiya_qarzi = serializers.SerializerMethodField(read_only=True)
+    yigilgan_qarz = serializers.SerializerMethodField(read_only=True)
+    umumiy_balans = serializers.SerializerMethodField(read_only=True)
+    qarz_summasi = serializers.SerializerMethodField(read_only=True)
+    jami_cheklar = serializers.SerializerMethodField(read_only=True)
+    xaridlar = serializers.SerializerMethodField(read_only=True)
+    tolovlar = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Mijoz
         fields = [
-            'id', 'biznes', 'ism', 'familiya', 'otasining_ismi', 'tugilgan_sana', 'tugilgan_kun',
-            'jinsi', 'telefon_raqam_1', 'telefon_raqam_2', 'phone', 'manzil', 'guruhlar', 'teglar',
-            'xaridlar_summasi', 'oxirgi_xarid',
+            'id', 'biznes', 'ism', 'familiya', 'otasining_ismi', 'fish', 'full_name', 'tugilgan_sana', 'tugilgan_kun',
+            'jinsi', 'telefon_raqam_1', 'telefon_raqam_2', 'phone', 'manzil',
+            'xaridlar_summasi', 'oxirgi_xarid', 'oxirgi_tranzaksiya_qarzi', 'yigilgan_qarz', 'umumiy_balans',
+            'qarz_summasi', 'jami_cheklar', 'xaridlar', 'tolovlar',
             'yaratilgan_vaqt', 'yangilangan_vaqt', 'royshatdan_otgan_sana', 'created_at'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+
+    def get_fish(self, obj):
+        full = f"{obj.ism} {obj.familiya or ''} {obj.otasining_ismi or ''}".strip()
+        return full if full else obj.ism
+
+    def get_full_name(self, obj):
+        return self.get_fish(obj)
+
+    def get_oxirgi_tranzaksiya_qarzi(self, obj):
+        last_sale = obj.sotuvlar.filter(holat='yakunlangan').order_by('-yaratilgan_vaqt').first()
+        if last_sale:
+            return str(last_sale.nasiya_summa)
+        return '0.00'
+
+    def get_yigilgan_qarz(self, obj):
+        from django.db.models import Sum
+        from decimal import Decimal
+        q = obj.qarzlar.exclude(holat='tolangan').aggregate(t=Sum('qoldiq_summa'))['t'] or Decimal('0.00')
+        if q == Decimal('0.00'):
+            q = obj.sotuvlar.filter(holat='yakunlangan', nasiya_summa__gt=0).aggregate(t=Sum('nasiya_summa'))['t'] or Decimal('0.00')
+        return str(q)
+
+    def get_umumiy_balans(self, obj):
+        return self.get_yigilgan_qarz(obj)
+
+    def get_qarz_summasi(self, obj):
+        return self.get_yigilgan_qarz(obj)
+
+    def get_jami_cheklar(self, obj):
+        return obj.sotuvlar.filter(holat='yakunlangan').count()
+
+    def get_xaridlar(self, obj):
+        from sales.serializers import SaleSerializer
+        recent_sales = obj.sotuvlar.filter(holat='yakunlangan').order_by('-yaratilgan_vaqt')[:20]
+        return SaleSerializer(recent_sales, many=True).data
+
+    def get_tolovlar(self, obj):
+        payments = obj.tolovlar.all().order_by('-yaratilgan_vaqt')[:20]
+        return [
+            {
+                'id': p.id,
+                'summa': str(p.summa),
+                'tolov_usuli': p.get_tolov_usuli_display(),
+                'xodim_nomi': f"{p.xodim.ism} {p.xodim.familiya}" if p.xodim else "",
+                'yaratilgan_vaqt': p.yaratilgan_vaqt.strftime("%d.%m.%Y %H:%M") if p.yaratilgan_vaqt else "",
+                'eslatma': p.eslatma
+            }
+            for p in payments
+        ]
 
     def get_xaridlar_summasi(self, obj):
         if hasattr(obj, 'annotated_xaridlar_summasi') and obj.annotated_xaridlar_summasi is not None:

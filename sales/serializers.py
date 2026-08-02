@@ -32,13 +32,17 @@ class SaleSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     yakuniy_summa = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     nasiya_summa = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
 
+    tolov_usuli_display = serializers.CharField(source='get_tolov_usuli_display', read_only=True)
+    naqd_summa = serializers.SerializerMethodField(read_only=True)
+    karta_summa = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Sale
         fields = [
             'id', 'biznes', 'dokon', 'dokon_nomi', 'mijoz', 'mijoz_nomi', 'xodim', 'xodim_nomi',
             'kod', 'holat', 'oraliq_jami', 'chegirma_turi', 'chegirma_qiymati', 'chegirma_summasi',
-            'yakuniy_summa', 'tolangan_summa', 'nasiya_summa', 'tolov_usuli', 'eslatma',
-            'elementlar', 'yaratilgan_vaqt', 'yangilangan_vaqt'
+            'yakuniy_summa', 'tolangan_summa', 'nasiya_summa', 'tolov_usuli', 'tolov_usuli_display',
+            'naqd_summa', 'karta_summa', 'eslatma', 'elementlar', 'yaratilgan_vaqt', 'yangilangan_vaqt'
         ]
         read_only_fields = ['biznes', 'xodim', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
@@ -47,6 +51,16 @@ class SaleSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
     def get_mijoz_nomi(self, obj):
         return f"{obj.mijoz.ism} {obj.mijoz.familiya}" if obj.mijoz else "Anonim Mijoz"
+
+    def get_naqd_summa(self, obj):
+        if obj.tolov_usuli == 'naqd':
+            return str(obj.tolangan_summa)
+        return '0.00'
+
+    def get_karta_summa(self, obj):
+        if obj.tolov_usuli == 'karta':
+            return str(obj.tolangan_summa)
+        return '0.00'
 
     def validate(self, attrs):
         # If creating or updating status to completed

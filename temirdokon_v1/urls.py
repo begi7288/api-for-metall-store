@@ -19,7 +19,7 @@ from django.urls import path,include
 from django.conf.urls.static import static
 from django.conf import settings
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
-from user.extra_views import CategoriesViewSet, UnitsViewSet, RolesViewSet, ArchiveListAPIView
+from user.extra_views import CategoriesViewSet, UnitsViewSet, RolesViewSet, BrandsViewSet, ArchiveListAPIView
 from products.views.taminotchi import TaminotchiViewSet
 
 from user.views import XodimViewSet, RegisterRequestAPIView, VerifyCEOAPIView
@@ -55,6 +55,13 @@ urlpatterns = [
     path('kategoriya/<int:pk>/', CategoriesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='kategoriya-detail'),
     path('kategoriyalar/', CategoriesViewSet.as_view({'get': 'list', 'post': 'create'}), name='kategoriyalar-list'),
     path('kategoriyalar/<int:pk>/', CategoriesViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='kategoriyalar-detail'),
+
+    path('brands/', BrandsViewSet.as_view({'get': 'list', 'post': 'create'}), name='brands-list'),
+    path('brands/<int:pk>/', BrandsViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='brands-detail'),
+    path('brend/', BrandsViewSet.as_view({'get': 'list', 'post': 'create'}), name='brend-list'),
+    path('brend/<int:pk>/', BrandsViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='brend-detail'),
+    path('brendlar/', BrandsViewSet.as_view({'get': 'list', 'post': 'create'}), name='brendlar-list'),
+    path('brendlar/<int:pk>/', BrandsViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='brendlar-detail'),
 
     path('taminotchi/', TaminotchiViewSet.as_view({'get': 'list', 'post': 'create'}), name='taminotchi-list'),
     path('taminotchi/<int:pk>/', TaminotchiViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='taminotchi-detail'),

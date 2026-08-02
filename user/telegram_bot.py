@@ -56,10 +56,25 @@ def send_telegram_message(text: str):
 
 def notify_sale(sale):
     try:
+        from sales.models import Sale
+        from decimal import Decimal
+        from django.utils import timezone
+
         xodim_ism = f"{sale.xodim.ism} {sale.xodim.familiya}".strip() if sale.xodim else "Noma'lum"
         dokon_nomi = sale.dokon.nomi if sale.dokon else "Noma'lum"
         mijoz_nomi = f"{sale.mijoz.ism} {sale.mijoz.familiya}".strip() if sale.mijoz else "Anonim Mijoz"
         vaqt_str = sale.yaratilgan_vaqt.strftime("%d.%m.%Y %H:%M") if sale.yaratilgan_vaqt else ""
+
+        # Calculate daily sale sequence number
+        sale_date = sale.yaratilgan_vaqt.date() if sale.yaratilgan_vaqt else timezone.now().date()
+        daily_count = Sale.objects.filter(
+            biznes=sale.biznes,
+            yaratilgan_vaqt__date=sale_date,
+            holat='yakunlangan',
+            id__lte=sale.id
+        ).count()
+        if daily_count == 0:
+            daily_count = 1
 
         items_lines = []
         for idx, item in enumerate(sale.elementlar.select_related('mahsulot', 'mahsulot__olchov_birligi').all(), 1):
@@ -72,33 +87,56 @@ def notify_sale(sale):
 
         items_text = "\n".join(items_lines) if items_lines else "<i>Mahsulotlar ko'rsatilmadi</i>"
 
+        # Payment methods breakdown
+        naqd = getattr(sale, 'naqd_summa', Decimal('0.00')) or Decimal('0.00')
+        karta = getattr(sale, 'karta_summa', Decimal('0.00')) or Decimal('0.00')
+        nasiya = getattr(sale, 'nasiya_summa', Decimal('0.00')) or Decimal('0.00')
+
+        if naqd == Decimal('0.00') and karta == Decimal('0.00') and nasiya == Decimal('0.00'):
+            if sale.tolov_usuli == 'naqd':
+                naqd = sale.yakuniy_summa
+            elif sale.tolov_usuli == 'karta':
+                karta = sale.yakuniy_summa
+            elif sale.tolov_usuli == 'nasiya':
+                nasiya = sale.yakuniy_summa
+            elif sale.tolov_usuli == 'aralash':
+                naqd = getattr(sale, 'tolangan_summa', Decimal('0.00'))
+                nasiya = getattr(sale, 'nasiya_summa', Decimal('0.00'))
+
+        tolov_turlari_lines = []
+        if naqd > Decimal('0.00'):
+            tolov_turlari_lines.append(f"💵 <b>Naqd:</b> <code>{naqd:,.0f}</code> so'm")
+        if karta > Decimal('0.00'):
+            tolov_turlari_lines.append(f"💳 <b>Karta:</b> <code>{karta:,.0f}</code> so'm")
+        if nasiya > Decimal('0.00'):
+            tolov_turlari_lines.append(f"⚠️ <b>Nasiya (Qarz):</b> <code>{nasiya:,.0f}</code> so'm")
+
+        if not tolov_turlari_lines:
+            tolov_usuli_disp = sale.get_tolov_usuli_display() if hasattr(sale, 'get_tolov_usuli_display') else sale.tolov_usuli
+            tolov_turlari_lines.append(f"💳 <b>{tolov_usuli_disp}:</b> <code>{sale.yakuniy_summa:,.0f}</code> so'm")
+
         msg_parts = [
-            f"<b>🛒 YANGI SOTUV #{sale.kod}</b>",
+            f"<b>🛒 SOTUV #{daily_count}</b>",
             f"📅 <b>Sana:</b> {vaqt_str}",
             f"🏪 <b>Do'kon:</b> {dokon_nomi}",
             f"👤 <b>Xodim:</b> {xodim_ism}",
             f"🤝 <b>Mijoz:</b> {mijoz_nomi}",
         ]
-        if sale.mijoz and getattr(sale.mijoz, 'telefon_raqam', None):
-            msg_parts.append(f"📞 <b>Tel:</b> {sale.mijoz.telefon_raqam}")
+        if sale.mijoz:
+            tel = getattr(sale.mijoz, 'telefon_raqam_1', None) or getattr(sale.mijoz, 'telefon_raqam', None)
+            if tel:
+                msg_parts.append(f"📞 <b>Tel:</b> {tel}")
 
         msg_parts.append(f"\n📦 <b>Mahsulotlar:</b>\n{items_text}\n")
-        msg_parts.append(f"💵 <b>Oraliq jami:</b> <code>{sale.oraliq_jami:,.0f}</code> so'm")
 
         if sale.chegirma_summasi > 0:
             ch_turi = "%" if sale.chegirma_turi == 'foiz' else "so'm"
             msg_parts.append(f"🏷 <b>Chegirma ({sale.chegirma_qiymati} {ch_turi}):</b> <code>-{sale.chegirma_summasi:,.0f}</code> so'm")
 
-        tolov_usuli_disp = sale.get_tolov_usuli_display() if hasattr(sale, 'get_tolov_usuli_display') else sale.tolov_usuli
         msg_parts.append(f"💰 <b>Yakuniy summa:</b> <code>{sale.yakuniy_summa:,.0f}</code> so'm")
-        msg_parts.append(f"💳 <b>To'lov usuli:</b> {tolov_usuli_disp}")
-        msg_parts.append(f"✅ <b>To'langan summa:</b> <code>{sale.tolangan_summa:,.0f}</code> so'm")
-
-        if sale.nasiya_summa > 0:
-            msg_parts.append(f"⚠️ <b>Nasiya (Qarz):</b> <code>{sale.nasiya_summa:,.0f}</code> so'm")
-
-        if sale.eslatma:
-            msg_parts.append(f"\n📝 <b>Eslatma:</b> {sale.eslatma}")
+        msg_parts.append("💳 <b>To'lov turlari va summalari:</b>")
+        for line in tolov_turlari_lines:
+            msg_parts.append(f"   └ {line}")
 
         send_telegram_message("\n".join(msg_parts))
     except Exception as e:

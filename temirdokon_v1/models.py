@@ -13,5 +13,7 @@ class BaseModel(models.Model):
         abstract = True
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        if not kwargs.get('raw', False):
+            self.full_clean()
         super().save(*args, **kwargs)
+

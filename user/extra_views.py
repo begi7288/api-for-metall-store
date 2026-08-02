@@ -1,14 +1,37 @@
 from rest_framework import serializers, viewsets, status
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from products.models import Mahsulot, MahsulotToifasi, OlchovBirligi
+from products.models import Mahsulot, MahsulotToifasi, OlchovBirligi, Taminotchi, MahsulotBrend
 from user.models import Xodim, XodimRoli
 from products.serializers import MahsulotSerializer
 
 # ============================================================
 # Serializers
 # ============================================================
+
+class MahsulotBrendSerializer(serializers.ModelSerializer):
+    nomi = serializers.CharField(required=False)
+    name = serializers.CharField(required=False)
+    brend = serializers.CharField(source='nomi', read_only=True)
+    brand = serializers.CharField(source='nomi', read_only=True)
+
+    class Meta:
+        model = MahsulotBrend
+        fields = ['id', 'biznes', 'nomi', 'name', 'brend', 'brand', 'is_active']
+        read_only_fields = ['biznes']
+
+    def validate(self, attrs):
+        nomi = attrs.get('nomi') or attrs.get('name') or self.initial_data.get('brend') or self.initial_data.get('brand')
+        if not nomi:
+            if self.instance and hasattr(self.instance, 'nomi'):
+                nomi = self.instance.nomi
+            else:
+                raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
+        attrs['nomi'] = nomi
+        attrs.pop('name', None)
+        return attrs
 
 class MahsulotToifasiSerializer(serializers.ModelSerializer):
     nomi = serializers.CharField(required=False)
@@ -18,7 +41,7 @@ class MahsulotToifasiSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MahsulotToifasi
-        fields = ['id', 'biznes', 'nomi', 'name', 'kategoriya', 'category']
+        fields = ['id', 'biznes', 'nomi', 'name', 'kategoriya', 'category', 'is_active']
         read_only_fields = ['biznes']
 
     def validate(self, attrs):
@@ -133,6 +156,7 @@ class XodimRoliSerializer(serializers.ModelSerializer):
 class CategoriesViewSet(viewsets.ModelViewSet):
     serializer_class = MahsulotToifasiSerializer
     permission_classes = [IsAuthenticated]
+    filterset_fields = ['is_active']
 
     def get_queryset(self):
         user = self.request.user
@@ -140,19 +164,109 @@ class CategoriesViewSet(viewsets.ModelViewSet):
             return MahsulotToifasi.objects.none()
         
         biznes = user.xodim.biznes
+        if getattr(self, 'action', None) in ['destroy', 'retrieve', 'update', 'partial_update']:
+            return MahsulotToifasi.objects.filter(biznes=biznes)
+
         queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
-        if not queryset.exists():
+        if not queryset.exists() and not MahsulotToifasi.objects.filter(biznes=biznes).exists():
             existing_cats = Mahsulot.objects.filter(biznes=biznes).exclude(toifa__isnull=True).exclude(toifa="").values_list('toifa', flat=True).distinct()
             cats_to_create = list(existing_cats)
             if cats_to_create:
                 toifalar = [MahsulotToifasi(biznes=biznes, nomi=cat) for cat in cats_to_create]
                 MahsulotToifasi.objects.bulk_create(toifalar)
                 queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
-            
+
+        is_active_param = self.request.query_params.get('is_active')
+        archive_param = self.request.query_params.get('archive')
+        if is_active_param is not None:
+            val = is_active_param.lower() in ('true', '1', 'yes', 't')
+            queryset = queryset.filter(is_active=val)
+        elif archive_param is not None:
+            val = archive_param.lower() in ('true', '1', 'yes', 't')
+            queryset = queryset.filter(is_active=not val)
+        else:
+            queryset = queryset.filter(is_active=True)
+
         return queryset
 
     def perform_create(self, serializer):
         serializer.save(biznes=self.request.user.xodim.biznes)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "Kategoriya muvaffaqiyatli arxivlandi."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        user = request.user
+        base_qs = MahsulotToifasi.objects.all()
+        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes and not user.is_superuser:
+            base_qs = base_qs.filter(biznes=user.xodim.biznes)
+        instance = base_qs.filter(pk=pk).first()
+        if not instance:
+            return Response({"detail": "Kategoriya topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+        instance.is_active = True
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "Kategoriya muvaffaqiyatli tiklandi."}, status=status.HTTP_200_OK)
+
+
+class BrandsViewSet(viewsets.ModelViewSet):
+    serializer_class = MahsulotBrendSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['is_active']
+    search_fields = ['nomi']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated or not hasattr(user, 'xodim') or not user.xodim.biznes:
+            return MahsulotBrend.objects.none()
+        
+        biznes = user.xodim.biznes
+        queryset = MahsulotBrend.objects.filter(biznes=biznes).order_by('nomi')
+        if not queryset.exists() and not MahsulotBrend.objects.filter(biznes=biznes).exists():
+            existing_brands = Mahsulot.objects.filter(biznes=biznes).exclude(brend__isnull=True).values_list('brend__nomi', flat=True).distinct()
+            brands_to_create = list(existing_brands)
+            if brands_to_create:
+                brendlar = [MahsulotBrend(biznes=biznes, nomi=b) for b in brands_to_create if b]
+                MahsulotBrend.objects.bulk_create(brendlar)
+                queryset = MahsulotBrend.objects.filter(biznes=biznes).order_by('nomi')
+
+        is_active_param = self.request.query_params.get('is_active')
+        archive_param = self.request.query_params.get('archive')
+        if is_active_param is not None:
+            val = is_active_param.lower() in ('true', '1', 'yes', 't')
+            queryset = queryset.filter(is_active=val)
+        elif archive_param is not None:
+            val = archive_param.lower() in ('true', '1', 'yes', 't')
+            queryset = queryset.filter(is_active=not val)
+        else:
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(biznes=self.request.user.xodim.biznes)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "Brend muvaffaqiyatli arxivlandi."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        user = request.user
+        base_qs = MahsulotBrend.objects.all()
+        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes and not user.is_superuser:
+            base_qs = base_qs.filter(biznes=user.xodim.biznes)
+        instance = base_qs.filter(pk=pk).first()
+        if not instance:
+            return Response({"detail": "Brend topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+        instance.is_active = True
+        instance.save(update_fields=['is_active'])
+        return Response({"detail": "Brend muvaffaqiyatli tiklandi."}, status=status.HTTP_200_OK)
 
 
 class UnitsViewSet(viewsets.ModelViewSet):
@@ -249,6 +363,91 @@ class ArchiveListAPIView(APIView):
                 "name": p.nomi,
                 "sana": p.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if p.yangilangan_vaqt else "",
                 "date": p.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if p.yangilangan_vaqt else "",
+                "holat": "O'chirilgan",
+                "status": "O'chirilgan"
+            })
+
+        # Inactive Suppliers (Ta'minotchilar)
+        suppliers = Taminotchi.objects.filter(is_active=False).order_by('-yangilangan_vaqt')
+        if user.is_superuser:
+            pass
+        elif biznes:
+            suppliers = suppliers.filter(biznes=biznes)
+        else:
+            suppliers = suppliers.none()
+
+        if search:
+            from django.db import models
+            suppliers = suppliers.filter(
+                models.Q(nomi__icontains=search) |
+                models.Q(telefon_raqam__icontains=search)
+            )
+
+        for s in suppliers:
+            archive_items.append({
+                "id": s.id,
+                "tur": "Ta'minotchi",
+                "type": "Ta'minotchi",
+                "nomi": s.nomi,
+                "name": s.nomi,
+                "boshliq": s.yuridik_nomi or "",
+                "manzil": s.yuridik_manzil or "",
+                "telefon": s.telefon_raqam or "",
+                "phone": s.telefon_raqam or "",
+                "sana": s.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if s.yangilangan_vaqt else "",
+                "date": s.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if s.yangilangan_vaqt else "",
+                "holat": "O'chirilgan",
+                "status": "O'chirilgan"
+            })
+
+        # Inactive Categories (Kategoriyalar)
+        categories = MahsulotToifasi.objects.filter(is_active=False).order_by('-yangilangan_vaqt')
+        if user.is_superuser:
+            pass
+        elif biznes:
+            categories = categories.filter(biznes=biznes)
+        else:
+            categories = categories.none()
+
+        if search:
+            from django.db import models
+            categories = categories.filter(models.Q(nomi__icontains=search))
+
+        for c in categories:
+            archive_items.append({
+                "id": c.id,
+                "tur": "Kategoriya",
+                "type": "Kategoriya",
+                "nomi": c.nomi,
+                "name": c.nomi,
+                "sana": c.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if c.yangilangan_vaqt else "",
+                "date": c.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if c.yangilangan_vaqt else "",
+                "holat": "O'chirilgan",
+                "status": "O'chirilgan"
+            })
+
+        # Inactive Brands (Brendlar)
+        brands = MahsulotBrend.objects.filter(is_active=False).order_by('-yangilangan_vaqt')
+        if user.is_superuser:
+            pass
+        elif biznes:
+            brands = brands.filter(biznes=biznes)
+        else:
+            brands = brands.none()
+
+        if search:
+            from django.db import models
+            brands = brands.filter(models.Q(nomi__icontains=search))
+
+        for b in brands:
+            archive_items.append({
+                "id": b.id,
+                "tur": "Brend",
+                "type": "Brend",
+                "nomi": b.nomi,
+                "name": b.nomi,
+                "sana": b.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if b.yangilangan_vaqt else "",
+                "date": b.yangilangan_vaqt.strftime("%d.%m.%Y %H:%M") if b.yangilangan_vaqt else "",
                 "holat": "O'chirilgan",
                 "status": "O'chirilgan"
             })

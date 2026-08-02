@@ -437,4 +437,39 @@ class SupplierOrdersAPITestCase(APITestCase):
         self.assertIn('id', response.data)
         self.assertEqual(Decimal(response.data['umumiy_summa']), Decimal('300000.00')) # 25 * 12000
 
+    def test_supplier_detail_tabs_apis(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token1)
+        
+        # 1. Dashboard API
+        dash_url = f"/products/suppliers/{self.supplier1.id}/dashboard/"
+        dash_res = self.client.get(dash_url)
+        self.assertEqual(dash_res.status_code, status.HTTP_200_OK)
+        self.assertIn('balans', dash_res.data)
+        self.assertIn('buyurtmalar_summasi', dash_res.data)
+
+        # 2. Payments & History API
+        pay_url = f"/products/suppliers/{self.supplier1.id}/payments/"
+        pay_res = self.client.get(pay_url)
+        self.assertEqual(pay_res.status_code, status.HTTP_200_OK)
+
+        hist_url = f"/products/suppliers/{self.supplier1.id}/history/"
+        hist_res = self.client.get(hist_url)
+        self.assertEqual(hist_res.status_code, status.HTTP_200_OK)
+
+        # 3. Orders & Buyurtmalar API
+        orders_url = f"/products/suppliers/{self.supplier1.id}/orders/"
+        orders_res = self.client.get(orders_url)
+        self.assertEqual(orders_res.status_code, status.HTTP_200_OK)
+
+        stats_url = f"/products/suppliers/{self.supplier1.id}/order-stats/"
+        stats_res = self.client.get(stats_url)
+        self.assertEqual(stats_res.status_code, status.HTTP_200_OK)
+        self.assertIn('barchasi', stats_res.data)
+
+        # 4. Products & Mahsulotlar API
+        prod_url = f"/products/suppliers/{self.supplier1.id}/products/"
+        prod_res = self.client.get(prod_url)
+        self.assertEqual(prod_res.status_code, status.HTTP_200_OK)
+
+
 

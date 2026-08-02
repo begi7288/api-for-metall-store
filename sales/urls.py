@@ -22,6 +22,8 @@ urlpatterns = [
     path('abc-xyz/', SaleViewSet.as_view({'get': 'abc_xyz'}), name='sales-abc-xyz'),
     path('foizlar/', SaleViewSet.as_view({'get': 'abc_xyz'}), name='sales-foizlar'),
     path('percentages/', SaleViewSet.as_view({'get': 'abc_xyz'}), name='sales-percentages'),
+    path('payments-history/', SaleViewSet.as_view({'get': 'payments_history'}), name='sales-payments-history'),
+    path('tolovlar-tarixi/', SaleViewSet.as_view({'get': 'payments_history'}), name='sales-tolovlar-tarixi'),
 
     # Expense alias routes
     path('expenses/categories/', XarajatKategoriyasiViewSet.as_view({'get': 'list', 'post': 'create'}), name='expense-categories'),

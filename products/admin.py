@@ -3,7 +3,7 @@ from .models import (
     Mahsulot, Import, Dokon, Transfer, Characteristic, MahsulotRasm,
     MahsulotShtrixKod, Taminotchi, WriteOff, WriteOffItem,
     OlchovBirligi, MahsulotToifasi, DokonQoldiq, Toplam, ToplamElement,
-    XususiyatMaydoni, YorliqShablon
+    XususiyatMaydoni, YorliqShablon, MahsulotBrend
 )
 
 @admin.register(Dokon)
@@ -14,7 +14,7 @@ class DokonAdmin(admin.ModelAdmin):
 @admin.register(Mahsulot)
 class MahsulotAdmin(admin.ModelAdmin):
     list_display = ('id', 'nomi', 'biznes', 'kelish_narxi', 'sotish_narxi', 'miqdori', 'is_active', 'yaratilgan_vaqt')
-    search_fields = ('nomi', 'brend', 'toifa')
+    search_fields = ('nomi', 'brend__nomi', 'toifa')
     list_filter = ('is_active', 'biznes')
 
 @admin.register(Import)
@@ -53,6 +53,11 @@ class OlchovBirligiAdmin(admin.ModelAdmin):
 @admin.register(MahsulotToifasi)
 class MahsulotToifasiAdmin(admin.ModelAdmin):
     list_display = ('id', 'nomi', 'biznes', 'yaratilgan_vaqt')
+    search_fields = ('nomi',)
+
+@admin.register(MahsulotBrend)
+class MahsulotBrendAdmin(admin.ModelAdmin):
+    list_display = ('id', 'nomi', 'biznes', 'is_active', 'yaratilgan_vaqt')
     search_fields = ('nomi',)
 
 @admin.register(DokonQoldiq)

@@ -163,51 +163,117 @@ class SaleViewSet(viewsets.ModelViewSet):
         from django.db import models
         from decimal import Decimal
         from django.utils import timezone
-        from datetime import timedelta
-        from .models import SaleItem
+        from datetime import timedelta, datetime
+        from .models import SaleItem, Xarajat
 
         user = request.user
         base_sales = self.filter_queryset(self.get_queryset())
         completed_sales = base_sales.filter(holat='yakunlangan')
 
+        start_date_str = (
+            request.query_params.get('start_date') or
+            request.query_params.get('dan') or
+            request.query_params.get('from_date') or
+            request.query_params.get('start')
+        )
+        end_date_str = (
+            request.query_params.get('end_date') or
+            request.query_params.get('gacha') or
+            request.query_params.get('to_date') or
+            request.query_params.get('end')
+        )
+
         today = timezone.now().date()
-        yesterday = today - timedelta(days=1)
+        start_date = today
+        end_date = today
 
-        today_sales_qs = completed_sales.filter(yaratilgan_vaqt__date=today)
-        bugungi_savdo = today_sales_qs.aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str.strip(), "%Y-%m-%d").date()
+            except ValueError:
+                pass
 
-        yesterday_sales_qs = completed_sales.filter(yaratilgan_vaqt__date=yesterday)
-        yesterday_sales = yesterday_sales_qs.aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str.strip(), "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        period_sales_qs = completed_sales.filter(yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date)
+        bugungi_savdo = period_sales_qs.aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
+
+        days_delta = (end_date - start_date).days + 1
+        prev_start = start_date - timedelta(days=days_delta)
+        prev_end = start_date - timedelta(days=1)
+        prev_sales_qs = completed_sales.filter(yaratilgan_vaqt__date__gte=prev_start, yaratilgan_vaqt__date__lte=prev_end)
+        prev_sales = prev_sales_qs.aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
 
         savdo_osish = 0.0
-        if yesterday_sales > 0:
-            savdo_osish = round(float((bugungi_savdo - yesterday_sales) / yesterday_sales * 100), 2)
+        if prev_sales > 0:
+            savdo_osish = round(float((bugungi_savdo - prev_sales) / prev_sales * 100), 2)
 
         bugungi_xarajat = Decimal('0.00')
-        if user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes:
-            biznes = user.xodim.biznes
-            from orders.models import SupplierOrderPayment
+        jami_xarajat = Decimal('0.00')
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
+
+        if biznes:
+            from orders.models import SupplierOrder, SupplierOrderPayment
             from products.models import WriteOff
-            sp_today = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date=today).aggregate(total=models.Sum('tolangan_summa'))['total'] or Decimal('0.00')
-            wo_today = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=today).aggregate(total=models.Sum('kelish_summasi'))['total'] or Decimal('0.00')
-            bugungi_xarajat = sp_today + wo_today
+
+            xarajat_period = Xarajat.objects.filter(biznes=biznes, yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('miqdor'))['t'] or Decimal('0.00')
+            sp_period = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('tolangan_summa'))['t'] or Decimal('0.00')
+            so_period = SupplierOrder.objects.filter(biznes=biznes, holat__in=['qabul_qilingan', 'yakunlangan'], yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('umumiy_summa'))['t'] or Decimal('0.00')
+            wo_period = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date).aggregate(t=models.Sum('kelish_summasi'))['t'] or Decimal('0.00')
+            
+            kirim_xarajati_period = max(so_period, sp_period)
+            bugungi_xarajat = xarajat_period + kirim_xarajati_period + wo_period
+
+            xarajat_all = Xarajat.objects.filter(biznes=biznes).aggregate(t=models.Sum('miqdor'))['t'] or Decimal('0.00')
+            sp_all = SupplierOrderPayment.objects.filter(order__biznes=biznes).aggregate(t=models.Sum('tolangan_summa'))['t'] or Decimal('0.00')
+            so_all = SupplierOrder.objects.filter(biznes=biznes, holat__in=['qabul_qilingan', 'yakunlangan']).aggregate(t=models.Sum('umumiy_summa'))['t'] or Decimal('0.00')
+            wo_all = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan').aggregate(t=models.Sum('kelish_summasi'))['t'] or Decimal('0.00')
+            
+            kirim_xarajati_all = max(so_all, sp_all)
+            jami_xarajat = xarajat_all + kirim_xarajati_all + wo_all
 
         sof_pul = max(Decimal('0.00'), bugungi_savdo - bugungi_xarajat)
 
-        credit_sales_qs = base_sales.filter(yaratilgan_vaqt__date=today, nasiya_summa__gt=0)
+        credit_sales_qs = base_sales.filter(yaratilgan_vaqt__date__gte=start_date, yaratilgan_vaqt__date__lte=end_date, nasiya_summa__gt=0)
         nasiyaga_sotilgan = credit_sales_qs.aggregate(total=models.Sum('nasiya_summa'))['total'] or Decimal('0.00')
         nasiya_buyurtmalar_soni = credit_sales_qs.count()
 
-        total_sales_count = completed_sales.count()
-        naqd_count = completed_sales.filter(tolov_usuli='naqd').count()
-        karta_count = completed_sales.filter(tolov_usuli='karta').count()
-        nasiya_count = completed_sales.filter(tolov_usuli='nasiya').count()
+        total_sales_count = period_sales_qs.count()
+        naqd_count = period_sales_qs.filter(tolov_usuli='naqd').count()
+        karta_count = period_sales_qs.filter(tolov_usuli='karta').count()
+        nasiya_count = period_sales_qs.filter(tolov_usuli='nasiya').count()
+
+        naqd_summa = period_sales_qs.filter(tolov_usuli='naqd').aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+        karta_summa = period_sales_qs.filter(tolov_usuli='karta').aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+        nasiya_summa = period_sales_qs.filter(tolov_usuli='nasiya').aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
 
         naqd_percent = round((naqd_count / total_sales_count * 100), 1) if total_sales_count > 0 else 0.0
         karta_percent = round((karta_count / total_sales_count * 100), 1) if total_sales_count > 0 else 0.0
         nasiya_percent = round((nasiya_count / total_sales_count * 100), 1) if total_sales_count > 0 else 0.0
 
-        items = SaleItem.objects.filter(sotuv__in=completed_sales)
+        dinamikasi = []
+        cur_date = start_date
+        while cur_date <= end_date:
+            day_sales = completed_sales.filter(yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+            day_exp = Decimal('0.00')
+            if biznes:
+                x_d = Xarajat.objects.filter(biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('miqdor'))['t'] or Decimal('0.00')
+                s_d = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('tolangan_summa'))['t'] or Decimal('0.00')
+                w_d = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('kelish_summasi'))['t'] or Decimal('0.00')
+                day_exp = x_d + s_d + w_d
+            dinamikasi.append({
+                "sana": cur_date.strftime("%Y-%m-%d"),
+                "date": cur_date.strftime("%Y-%m-%d"),
+                "savdo": str(day_sales),
+                "xarajat": str(day_exp)
+            })
+            cur_date += timedelta(days=1)
+
+        items = SaleItem.objects.filter(sotuv__in=period_sales_qs)
         top_items = items.values('mahsulot', 'mahsulot__nomi').annotate(
             jami_miqdor=models.Sum('miqdori'),
             jami_summa=models.Sum('jami_summa')
@@ -234,27 +300,78 @@ class SaleViewSet(viewsets.ModelViewSet):
             for sale in recent_sales
         ]
 
+        # 1. Customer debt (Qancha bizdan qarz)
+        bizdan_qarz = Decimal('0.00')
+        if biznes:
+            from user.models import MijozQarzi
+            bizdan_qarz = MijozQarzi.objects.filter(biznes=biznes).exclude(holat='tolangan').aggregate(t=models.Sum('qoldiq_summa'))['t'] or Decimal('0.00')
+            if bizdan_qarz == Decimal('0.00'):
+                bizdan_qarz = base_sales.filter(holat='yakunlangan', nasiya_summa__gt=0).aggregate(t=models.Sum('nasiya_summa'))['t'] or Decimal('0.00')
+
+        # 2. Our debt to suppliers (Biz qancha qarzimiz)
+        bizning_qarz = Decimal('0.00')
+        if biznes:
+            from orders.models import SupplierOrder
+            bizning_qarz = SupplierOrder.objects.filter(biznes=biznes).exclude(holat='bekor_qilingan').aggregate(t=models.Sum('nasiya_summa'))['t'] or Decimal('0.00')
+
+        # 3. Discounts (Chegirmalar)
+        chegirmalar_summasi = period_sales_qs.aggregate(t=models.Sum('chegirma_summasi'))['t'] or Decimal('0.00')
+        chegirmali_sotuvlar_soni = period_sales_qs.filter(chegirma_summasi__gt=0).count()
+
         return Response({
             'bugungi_savdo': str(bugungi_savdo),
             'today_sales': str(bugungi_savdo),
             'todaySales': str(bugungi_savdo),
+            'savdo_summasi': str(bugungi_savdo),
             'savdo_osish': savdo_osish,
+            'savdoOsish': savdo_osish,
             'bugungi_xarajat': str(bugungi_xarajat),
             'today_expenses': str(bugungi_xarajat),
             'todayExpenses': str(bugungi_xarajat),
+            'xarajat_summasi': str(bugungi_xarajat),
+            'jami_xarajat': str(jami_xarajat),
+            'total_expenses': str(jami_xarajat),
             'sof_pul': str(sof_pul),
             'net_cash': str(sof_pul),
             'netCash': str(sof_pul),
+            'kassa_holati': str(sof_pul),
+            'kassaHolati': str(sof_pul),
             'nasiyaga_sotilgan': str(nasiyaga_sotilgan),
             'credit_sales': str(nasiyaga_sotilgan),
             'creditSales': str(nasiyaga_sotilgan),
             'nasiya_buyurtmalar_soni': nasiya_buyurtmalar_soni,
 
+            # Qarzlar statistikasi
+            'bizdan_qarz': str(bizdan_qarz),
+            'mijozlar_qarzi': str(bizdan_qarz),
+            'customers_debt': str(bizdan_qarz),
+
+            'bizning_qarz': str(bizning_qarz),
+            'taminotchilar_qarzi': str(bizning_qarz),
+            'our_debt': str(bizning_qarz),
+            'suppliers_debt': str(bizning_qarz),
+
+            # Chegirmalar statistikasi
+            'chegirmalar_summasi': str(chegirmalar_summasi),
+            'jami_chegirma': str(chegirmalar_summasi),
+            'discounts_total': str(chegirmalar_summasi),
+            'chegirmali_sotuvlar_soni': chegirmali_sotuvlar_soni,
+
             'tolov_turlari': {
                 'naqd': naqd_percent,
                 'karta': karta_percent,
                 'nasiya': nasiya_percent,
+                'naqd_percent': naqd_percent,
+                'karta_percent': karta_percent,
+                'nasiya_percent': nasiya_percent,
+                'naqd_summa': str(naqd_summa),
+                'karta_summa': str(karta_summa),
+                'nasiya_summa': str(nasiya_summa),
             },
+
+            'savdo_xarajat_dinamikasi': dinamikasi,
+            'dinamika': dinamikasi,
+            'dynamics': dinamikasi,
 
             'top_5_mahsulot': top_5_list,
             'top_products': top_5_list,
@@ -264,6 +381,52 @@ class SaleViewSet(viewsets.ModelViewSet):
             'recent_activities': recent_activities,
             'recentActivities': recent_activities,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='payments-history')
+    def payments_history(self, request):
+        from user.models import MijozTolovi
+        from orders.models import SupplierOrderPayment
+        from django.db import models
+
+        user = request.user
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
+
+        c_payments = MijozTolovi.objects.all().order_by('-yaratilgan_vaqt')
+        s_payments = SupplierOrderPayment.objects.all().order_by('-yaratilgan_vaqt')
+
+        if biznes:
+            c_payments = c_payments.filter(biznes=biznes)
+            s_payments = s_payments.filter(order__biznes=biznes)
+
+        history = []
+        for cp in c_payments[:50]:
+            history.append({
+                "id": f"c_{cp.id}",
+                "turi": "Mijoz to'lovi",
+                "shaxs": f"{cp.mijoz.ism} {cp.mijoz.familiya}" if cp.mijoz else "",
+                "summa": str(cp.summa),
+                "tolov_usuli": cp.get_tolov_usuli_display(),
+                "xodim": f"{cp.xodim.ism} {cp.xodim.familiya}" if cp.xodim else "",
+                "sana": cp.yaratilgan_vaqt
+            })
+
+        for sp in s_payments[:50]:
+            history.append({
+                "id": f"s_{sp.id}",
+                "turi": "Ta'minotchi to'lovi",
+                "shaxs": sp.order.taminotchi.nomi if (sp.order and sp.order.taminotchi) else "",
+                "summa": str(sp.tolangan_summa),
+                "tolov_usuli": sp.get_tolov_turi_display(),
+                "xodim": f"{sp.xodim.ism} {sp.xodim.familiya}" if sp.xodim else "",
+                "sana": sp.yaratilgan_vaqt
+            })
+
+        history.sort(key=lambda x: x['sana'], reverse=True)
+        return Response(history, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='tolovlar-tarixi')
+    def tolovlar_tarixi(self, request):
+        return self.payments_history(request)
 
     @action(detail=False, methods=['get'])
     def top_products(self, request):
@@ -307,22 +470,58 @@ class SaleViewSet(viewsets.ModelViewSet):
         from django.db import models
         from decimal import Decimal
         from django.utils import timezone
-        from datetime import timedelta
-        from .models import Xarajat, XarajatKategoriyasi
+        from datetime import timedelta, datetime
+        from .models import Sale, Xarajat, XarajatKategoriyasi
+        from orders.models import SupplierOrderPayment
+        from products.models import WriteOff
 
         user = request.user
-        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim')) else None
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
+
+        start_date_str = (
+            request.query_params.get('start_date') or
+            request.query_params.get('dan') or
+            request.query_params.get('from_date') or
+            request.query_params.get('start')
+        )
+        end_date_str = (
+            request.query_params.get('end_date') or
+            request.query_params.get('gacha') or
+            request.query_params.get('to_date') or
+            request.query_params.get('end')
+        )
 
         today = timezone.now().date()
+        start_date = today - timedelta(days=6)
+        end_date = today
+
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str.strip(), "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str.strip(), "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
         daily_list = []
-        for i in range(6, -1, -1):
-            day = today - timedelta(days=i)
-            kirim = Sale.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=day).aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
-            chiqim = Xarajat.objects.filter(biznes=biznes, sana=day).aggregate(total=models.Sum('miqdor'))['total'] or Decimal('0.00')
+        cur_date = start_date
+        while cur_date <= end_date:
+            kirim = Sale.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
+            
+            x_val = Xarajat.objects.filter(biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('miqdor'))['total'] or Decimal('0.00')
+            sp_val = SupplierOrderPayment.objects.filter(order__biznes=biznes, yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('tolangan_summa'))['total'] or Decimal('0.00')
+            wo_val = WriteOff.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum('kelish_summasi'))['total'] or Decimal('0.00')
+            chiqim = x_val + sp_val + wo_val
+
             sof = max(Decimal('0.00'), kirim - chiqim)
+
             daily_list.append({
-                'sana': day.strftime("%d.%m.%Y"),
-                'date': day.strftime("%Y-%m-%d"),
+                'sana': cur_date.strftime("%Y-%m-%d"),
+                'date': cur_date.strftime("%Y-%m-%d"),
                 'kirim': str(kirim),
                 'income': str(kirim),
                 'chiqim': str(chiqim),
@@ -330,20 +529,38 @@ class SaleViewSet(viewsets.ModelViewSet):
                 'sof_pul': str(sof),
                 'net_cash': str(sof)
             })
+            cur_date += timedelta(days=1)
 
         cat_list = []
         categories = XarajatKategoriyasi.objects.filter(models.Q(biznes=biznes) | models.Q(biznes__isnull=True))
         for cat in categories:
-            total_exp = Xarajat.objects.filter(biznes=biznes, kategoriya=cat).aggregate(total=models.Sum('miqdor'))['total'] or Decimal('0.00')
+            total_exp = Xarajat.objects.filter(
+                biznes=biznes,
+                kategoriya=cat,
+                yaratilgan_vaqt__date__gte=start_date,
+                yaratilgan_vaqt__date__lte=end_date
+            ).aggregate(total=models.Sum('miqdor'))['total'] or Decimal('0.00')
             cat_list.append({
                 'id': cat.id,
                 'nomi': cat.nomi,
                 'summa': str(total_exp)
             })
 
+        if not cat_list:
+            default_names = ["Ijara", "Tr", "Oylik", "Kom", "Boshqa"]
+            for idx, name in enumerate(default_names, 1):
+                cat_list.append({
+                    'id': idx,
+                    'nomi': name,
+                    'summa': '0.00'
+                })
+
         return Response({
             'dinamika': daily_list,
+            'kirim_chiqim_dinamikasi': daily_list,
+            'cashflow_dynamics': daily_list,
             'chiqim_kategoriyalari': cat_list,
+            'expense_categories': cat_list,
             'kunlik_pul_oqimi': daily_list,
             'daily_cash_flow': daily_list
         }, status=status.HTTP_200_OK)
@@ -353,12 +570,41 @@ class SaleViewSet(viewsets.ModelViewSet):
         from django.db import models
         from decimal import Decimal
         from django.utils import timezone
-        from datetime import timedelta
+        from datetime import timedelta, datetime
+        from .models import Sale
 
         user = request.user
-        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim')) else None
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
+
+        start_date_str = (
+            request.query_params.get('start_date') or
+            request.query_params.get('dan') or
+            request.query_params.get('from_date') or
+            request.query_params.get('start')
+        )
+        end_date_str = (
+            request.query_params.get('end_date') or
+            request.query_params.get('gacha') or
+            request.query_params.get('to_date') or
+            request.query_params.get('end')
+        )
 
         today = timezone.now().date()
+        start_date = today - timedelta(days=6)
+        end_date = today
+
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str.strip(), "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str.strip(), "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
         first_of_this_month = today.replace(day=1)
         first_of_last_month = (first_of_this_month - timedelta(days=1)).replace(day=1)
         end_of_last_month = first_of_this_month - timedelta(days=1)
@@ -366,14 +612,57 @@ class SaleViewSet(viewsets.ModelViewSet):
         joriy_oy_sum = Sale.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date__gte=first_of_this_month).aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
         otgan_oy_sum = Sale.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date__gte=first_of_last_month, yaratilgan_vaqt__date__lte=end_of_last_month).aggregate(total=models.Sum('yakuniy_summa'))['total'] or Decimal('0.00')
 
+        dinamika = []
+        best_day = {'sana': '-', 'date': '-', 'summa': Decimal('0.00')}
+        worst_day = {'sana': '-', 'date': '-', 'summa': Decimal('999999999.00')}
+
+        month_names_uz = {
+            1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Iyun',
+            7: 'Iyul', 8: 'Avg', 9: 'Sep', 10: 'Okt', 11: 'Noy', 12: 'Dek'
+        }
+
+        cur_date = start_date
+        has_sales = False
+        while cur_date <= end_date:
+            s_sum = Sale.objects.filter(biznes=biznes, holat='yakunlangan', yaratilgan_vaqt__date=cur_date).aggregate(t=models.Sum('yakuniy_summa'))['t'] or Decimal('0.00')
+            formatted_date_str = f"{cur_date.day}-{month_names_uz.get(cur_date.month, 'Iyul')}"
+
+            day_obj = {
+                'sana': formatted_date_str,
+                'date': cur_date.strftime("%Y-%m-%d"),
+                'summa': str(s_sum)
+            }
+            dinamika.append(day_obj)
+
+            if s_sum > best_day['summa']:
+                best_day = {'sana': formatted_date_str, 'date': cur_date.strftime("%Y-%m-%d"), 'summa': s_sum}
+                has_sales = True
+
+            if s_sum < worst_day['summa']:
+                worst_day = {'sana': formatted_date_str, 'date': cur_date.strftime("%Y-%m-%d"), 'summa': s_sum}
+
+            cur_date += timedelta(days=1)
+
+        if not has_sales:
+            best_day_res = {'sana': f"{today.day}-{month_names_uz.get(today.month, 'Iyul')}", 'summa': '0 so\'m'}
+            worst_day_res = {'sana': f"{today.day}-{month_names_uz.get(today.month, 'Iyul')}", 'summa': '0 so\'m'}
+        else:
+            best_day_res = {'sana': best_day['sana'], 'date': best_day['date'], 'summa': f"{best_day['summa']} so'm"}
+            worst_day_res = {'sana': worst_day['sana'], 'date': worst_day['date'], 'summa': f"{worst_day['summa']} so'm"}
+
         return Response({
             'otgan_oy': str(otgan_oy_sum),
             'last_month': str(otgan_oy_sum),
+            'otganOy': str(otgan_oy_sum),
             'joriy_oy': str(joriy_oy_sum),
             'current_month': str(joriy_oy_sum),
-            'eng_yaxshi_kun': {'sana': '-', 'summa': '0.00'},
-            'eng_sust_kun': {'sana': '-', 'summa': '0.00'},
-            'dinamika': []
+            'joriyOy': str(joriy_oy_sum),
+            'eng_yaxshi_kun': best_day_res,
+            'best_day': best_day_res,
+            'eng_sust_kun': worst_day_res,
+            'worst_day': worst_day_res,
+            'dinamika': dinamika,
+            'oylik_samaradorlik_dinamikasi': dinamika
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
@@ -383,29 +672,44 @@ class SaleViewSet(viewsets.ModelViewSet):
 
         completed_sales = self.filter_queryset(self.get_queryset()).filter(holat='yakunlangan')
         items = SaleItem.objects.filter(sotuv__in=completed_sales)
+
+        sort_param = request.query_params.get('sort_by') or request.query_params.get('sort') or 'sotuv_summasi'
+
         top_items = items.values('mahsulot', 'mahsulot__nomi').annotate(
             jami_miqdor=models.Sum('miqdori'),
             jami_summa=models.Sum('jami_summa')
-        ).order_by('-jami_summa')
+        )
+
+        if 'miqdor' in sort_param.lower():
+            top_items = top_items.order_by('-jami_miqdor')
+        else:
+            top_items = top_items.order_by('-jami_summa')
 
         data = []
         for item in top_items:
             qty = item['jami_miqdor'] or 1
             summa = item['jami_summa'] or Decimal('0.00')
+            avg = (summa / qty).quantize(Decimal('0.01')) if qty > 0 else Decimal('0.00')
             data.append({
                 'mahsulot_id': item['mahsulot'],
                 'nomi': item['mahsulot__nomi'],
+                'mahsulot_nomi': item['mahsulot__nomi'],
                 'miqdor': item['jami_miqdor'],
+                'miqdori': item['jami_miqdor'],
                 'sotuv_summasi': str(summa),
-                'ortacha_narx': str(round(summa / qty, 2))
+                'summa': str(summa),
+                'ortacha_narx': str(avg),
+                'ortachaNarx': str(avg)
             })
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def debts_analytics(self, request):
         from user.models import MijozQarzi, MijozTolovi
+        from django.utils import timezone
+        from decimal import Decimal
         user = request.user
-        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim')) else None
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
 
         qarzlar = MijozQarzi.objects.filter(biznes=biznes) if biznes else MijozQarzi.objects.none()
         tolovlar = MijozTolovi.objects.filter(biznes=biznes).order_by('-yaratilgan_vaqt')[:5] if biznes else MijozTolovi.objects.none()
@@ -413,25 +717,50 @@ class SaleViewSet(viewsets.ModelViewSet):
         recent_payments = [
             {
                 'ismlar': f"{t.mijoz.ism} {t.mijoz.familiya}" if t.mijoz else "Anonim",
-                'summa': str(t.tolangan_summa),
+                'summa': str(getattr(t, 'summa', getattr(t, 'tolangan_summa', Decimal('0.00')))),
                 'sana': t.yaratilgan_vaqt.strftime("%d.%m.%Y") if t.yaratilgan_vaqt else ""
             }
             for t in tolovlar
         ]
 
-        debtors_table = [
-            {
+        today = timezone.now().date()
+        aging = {'0-30': Decimal('0.00'), '31-60': Decimal('0.00'), '61-90': Decimal('0.00'), '90+': Decimal('0.00')}
+
+        for q in qarzlar:
+            ref_date = q.muddati or q.yaratilgan_vaqt.date()
+            days = (today - ref_date).days
+            val = q.qoldiq_summa
+            if days <= 30:
+                aging['0-30'] += val
+            elif days <= 60:
+                aging['31-60'] += val
+            elif days <= 90:
+                aging['61-90'] += val
+            else:
+                aging['90+'] += val
+
+        aging_res = {k: str(v) for k, v in aging.items()}
+
+        debtors_table = []
+        for q in qarzlar[:20]:
+            ref_date = q.muddati or q.yaratilgan_vaqt.date()
+            overdue_days = max(0, (today - ref_date).days)
+            last_pay = q.tolovlar.order_by('-yaratilgan_vaqt').first()
+            last_pay_date = last_pay.yaratilgan_vaqt.strftime("%d.%m.%Y") if last_pay else "-"
+            debtors_table.append({
                 'mijoz': f"{q.mijoz.ism} {q.mijoz.familiya}" if q.mijoz else "Mijoz",
+                'mijoz_nomi': f"{q.mijoz.ism} {q.mijoz.familiya}" if q.mijoz else "Mijoz",
                 'umumiy_qarz': str(q.qoldiq_summa),
-                'muddati_otgan': 0,
-                'oxirgi_tolov': '-',
+                'qarz_summasi': str(q.qoldiq_summa),
+                'muddati_otgan': overdue_days,
+                'overdue_days': overdue_days,
+                'oxirgi_tolov': last_pay_date,
                 'holat': q.get_holat_display()
-            }
-            for q in qarzlar[:10]
-        ]
+            })
 
         return Response({
-            'aging': {'0-30': 0, '31-60': 0, '61-90': 0, '90+': 0},
+            'aging': aging_res,
+            'qarzdorlik_yosh_tahlili': aging_res,
             'oxirgi_tolovlar': recent_payments,
             'recent_payments': recent_payments,
             'qarzdorlar_royxati': debtors_table,
@@ -445,20 +774,92 @@ class SaleViewSet(viewsets.ModelViewSet):
         from products.models import Mahsulot
 
         user = request.user
-        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim')) else None
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
 
         products = Mahsulot.objects.filter(biznes=biznes) if biznes else Mahsulot.objects.none()
 
         categories_def = {
-            'AX': {'count': 0, 'label': 'AX - Kassa Generatorlari', 'xulosa': 'Juda yuqori aylanma va barqaror talab.', 'tavsiya': 'Doimiy ombor qoldig\'ini ta\'minlang.'},
-            'AY': {'count': 0, 'label': 'AY - Mavsumiy', 'xulosa': 'Yuqori aylanma, lekin talab mavsumiy o\'zgaradi.', 'tavsiya': 'Mavsumiylik va aksiyalarni hisobga oling.'},
-            'AZ': {'count': 0, 'label': 'AZ - Katta Tavakkal', 'xulosa': 'Sotilsa juda katta kassa qiladi, lekin qachon sotilishi noma\'lum.', 'tavsiya': 'Omborda katta zaxira saqlamang. Faqat buyurtma asosida ishlang.'},
-            'BX': {'count': 0, 'label': 'BX - Barqaror O\'rtacha', 'xulosa': 'O\'rtacha aylanma va barqaror sotuv.', 'tavsiya': 'Optimal zaxira darajasini saqlang.'},
-            'BY': {'count': 0, 'label': 'BY - O\'rtacha O\'zgaruvchan', 'xulosa': 'O\'rtacha aylanma va o\'zgaruvchan sotuv.', 'tavsiya': 'Talab dinamikasini kuzatib boring.'},
-            'BZ': {'count': 0, 'label': 'BZ - Noaniq O\'rtacha', 'xulosa': 'O\'rtacha aylanma, noaniq talab.', 'tavsiya': 'Kichik partiyalarda xarid qiling.'},
-            'CX': {'count': 0, 'label': 'CX - Past Barqaror', 'xulosa': 'Past aylanma, lekin barqaror talab.', 'tavsiya': 'Zaxirani minimal darajada tuting.'},
-            'CY': {'count': 0, 'label': 'CY - Past O\'zgaruvchan', 'xulosa': 'Past aylanma va o\'zgaruvchan sotuv.', 'tavsiya': 'Xaridlarni optimallashtiring.'},
-            'CZ': {'count': 0, 'label': 'CZ - O\'lik Kapital', 'xulosa': 'Past aylanma va noaniq talab.', 'tavsiya': 'Tugallash yoki sotuvdan chiqarish choralarini ko\'ring.'},
+            'AX': {
+                'code': 'AX',
+                'label': 'AX - Faol Liderlar',
+                'nomi': 'AX - Faol Liderlar',
+                'count': 0,
+                'xulosa': 'Ushbu mahsulotlar sizga eng yuqori daromadni olib keladi va talab juda barqaror. Ular biznesingiz tayanchidir.',
+                'tavsiya': 'Zaxira hech qachon tugamasligi shart. Sug\'urta zaxirasini ushlab turing va yetkazib beruvchilar bilan eng yaxshi shartlar ustida ishlang.',
+                'strategik_tavsiya': 'Zaxira hech qachon tugamasligi shart. Sug\'urta zaxirasini ushlab turing va yetkazib beruvchilar bilan eng yaxshi shartlar ustida ishlang.'
+            },
+            'AY': {
+                'code': 'AY',
+                'label': 'AY - Mavsumiy',
+                'nomi': 'AY - Mavsumiy',
+                'count': 0,
+                'xulosa': 'Yuqori daromadli, lekin talab mavsumiylik va aksiyalarga bog\'liq.',
+                'tavsiya': 'Mavsumiy talab piki kelishidan oldin xaridlarni rejalashtiring.',
+                'strategik_tavsiya': 'Mavsumiy talab piki kelishidan oldin xaridlarni rejalashtiring.'
+            },
+            'AZ': {
+                'code': 'AZ',
+                'label': 'AZ - Katta Tavakkal',
+                'nomi': 'AZ - Katta Tavakkal',
+                'count': 0,
+                'xulosa': 'Sotilsa katta kassa qiladi, lekin qachon sotilishi noaniq.',
+                'tavsiya': 'Omborda ko\'p zaxira tutmang, buyurtma asosida ishlang.',
+                'strategik_tavsiya': 'Omborda ko\'p zaxira tutmang, buyurtma asosida ishlang.'
+            },
+            'BX': {
+                'code': 'BX',
+                'label': 'BX - Barqaror O\'rtacha',
+                'nomi': 'BX - Barqaror O\'rtacha',
+                'count': 0,
+                'xulosa': 'O\'rtacha daromad keltiruvchi, barqaror sotiladigan mahsulotlar.',
+                'tavsiya': 'Optimal zaxira darajasini saqlab turing.',
+                'strategik_tavsiya': 'Optimal zaxira darajasini saqlab turing.'
+            },
+            'BY': {
+                'code': 'BY',
+                'label': 'BY - O\'rtacha O\'zgaruvchan',
+                'nomi': 'BY - O\'rtacha O\'zgaruvchan',
+                'count': 0,
+                'xulosa': 'O\'rtacha daromadli va o\'zgaruvchan talabli mahsulotlar.',
+                'tavsiya': 'Talab o\'zgarishini muntazam monitoring qiling.',
+                'strategik_tavsiya': 'Talab o\'zgarishini muntazam monitoring qiling.'
+            },
+            'BZ': {
+                'code': 'BZ',
+                'label': 'BZ - Noaniq O\'rtacha',
+                'nomi': 'BZ - Noaniq O\'rtacha',
+                'count': 0,
+                'xulosa': 'O\'rtacha daromad, lekin sotuv jadvali noaniq.',
+                'tavsiya': 'Minimal hajmda xarid qiling.',
+                'strategik_tavsiya': 'Minimal hajmda xarid qiling.'
+            },
+            'CX': {
+                'code': 'CX',
+                'label': 'CX - Past Barqaror',
+                'nomi': 'CX - Past Barqaror',
+                'count': 0,
+                'xulosa': 'Kam daromadli, ammo doimiy xarid qilinadigan tovarlar.',
+                'tavsiya': 'Avtomatik minimal buyurtma nuqtasini sozlang.',
+                'strategik_tavsiya': 'Avtomatik minimal buyurtma nuqtasini sozlang.'
+            },
+            'CY': {
+                'code': 'CY',
+                'label': 'CY - Past O\'zgaruvchan',
+                'nomi': 'CY - Past O\'zgaruvchan',
+                'count': 0,
+                'xulosa': 'Kam daromadli va beqaror talabli mahsulotlar.',
+                'tavsiya': 'Zaxira hajmini kamaytiring.',
+                'strategik_tavsiya': 'Zaxira hajmini kamaytiring.'
+            },
+            'CZ': {
+                'code': 'CZ',
+                'label': 'CZ - O\'lik Kapital',
+                'nomi': 'CZ - O\'lik Kapital',
+                'count': 0,
+                'xulosa': 'Past aylanma va noaniq talab. Pul muzlab qolgan.',
+                'tavsiya': 'Aksiya qilib sotib yuboring yoki sotuvdan chiqaring.',
+                'strategik_tavsiya': 'Aksiya qilib sotib yuboring yoki sotuvdan chiqaring.'
+            },
         }
 
         products_data = []
@@ -481,18 +882,48 @@ class SaleViewSet(viewsets.ModelViewSet):
                 'mahsulot_nomi': p.nomi,
                 'nomi': p.nomi,
                 'toifa': cat,
+                'toifa_nomi': categories_def[cat]['label'],
                 'ombor_qoldigi': p.miqdori,
+                'omborQoldigi': p.miqdori,
                 'aylanma': str(aylanma),
                 'sof_foyda': str(round(aylanma * Decimal('0.2'), 2)),
+                'sofFoyda': str(round(aylanma * Decimal('0.2'), 2)),
                 'tavsiya': categories_def[cat]['tavsiya']
             })
+
+        toifa_param = request.query_params.get('toifa') or request.query_params.get('category') or 'AX'
+        limit_param = request.query_params.get('limit') or request.query_params.get('qatorlar_soni') or request.query_params.get('page_size') or '8'
+
+        try:
+            limit = int(limit_param)
+        except ValueError:
+            limit = 8
+
+        selected_cat_info = categories_def.get(toifa_param.upper(), categories_def['AX'])
+
+        filtered_products = [p for p in products_data if p['toifa'] == selected_cat_info['code']]
+
+        toifalar_list = [
+            {
+                'code': k,
+                'label': f"{v['label']} ({v['count']} ta)",
+                'nomi': v['label'],
+                'count': v['count'],
+                'xulosa': v['xulosa'],
+                'tavsiya': v['tavsiya'],
+                'strategik_tavsiya': v['strategik_tavsiya']
+            }
+            for k, v in categories_def.items()
+        ]
 
         matrix = {
             k: {
                 'count': v['count'],
                 'label': v['label'],
+                'nomi': v['label'],
                 'xulosa': v['xulosa'],
-                'tavsiya': v['tavsiya']
+                'tavsiya': v['tavsiya'],
+                'strategik_tavsiya': v['strategik_tavsiya']
             }
             for k, v in categories_def.items()
         }
@@ -509,12 +940,19 @@ class SaleViewSet(viewsets.ModelViewSet):
                 'CY': categories_def['CY']['count'],
                 'CZ': categories_def['CZ']['count'],
                 'kassa_generatorlari': categories_def['AX']['count'],
+                'kassaGeneratorlari': categories_def['AX']['count'],
                 'olik_kapital': categories_def['CZ']['count'],
+                'olikKapital': categories_def['CZ']['count'],
                 'mavsumiy': categories_def['AY']['count']
             },
+            'tanlangan_toifa': selected_cat_info,
+            'selected_category': selected_cat_info,
+            'toifalar_royxati': toifalar_list,
+            'categories_list': toifalar_list,
             'matrix': matrix,
-            'products': products_data,
-            'mahsulotlar': products_data
+            'products': filtered_products[:limit] if toifa_param else products_data[:limit],
+            'barcha_mahsulotlar': products_data,
+            'mahsulotlar': filtered_products[:limit] if toifa_param else products_data[:limit]
         }, status=status.HTTP_200_OK)
 
     def get_queryset(self):

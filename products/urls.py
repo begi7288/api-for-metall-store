@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import MahsulotViewSet, ImportViewSet, KirimViewSet, DokonViewSet, TransferViewSet, CharacteristicViewSet, MahsulotRasmViewSet, MahsulotShtrixKodViewSet, WriteOffViewSet, XususiyatMaydoniViewSet, ToplamViewSet, YorliqShablonViewSet, TaminotchiViewSet
-from user.extra_views import UnitsViewSet, CategoriesViewSet, ArchiveListAPIView
+from user.extra_views import UnitsViewSet, CategoriesViewSet, BrandsViewSet, ArchiveListAPIView
 
 router = DefaultRouter()
 router.register('dokon', DokonViewSet, basename='dokon')
@@ -25,6 +25,8 @@ router.register('olchov-birliklari', UnitsViewSet, basename='olchov-birliklari')
 router.register('units', UnitsViewSet, basename='units')
 router.register('toifalar', CategoriesViewSet, basename='toifalar')
 router.register('categories', CategoriesViewSet, basename='categories')
+router.register('brendlar', BrandsViewSet, basename='brendlar')
+router.register('brands', BrandsViewSet, basename='brands')
 router.register('', MahsulotViewSet, basename='mahsulot')
 
 urlpatterns = [

@@ -1419,7 +1419,7 @@ class ImportAPITestCase(APITestCase):
         self.assertEqual(product.kelish_narxi, Decimal("5000.00"))
         self.assertEqual(product.sotish_narxi, Decimal("7500.00"))
         self.assertEqual(product.toifa, "Metallar")
-        self.assertEqual(product.brend, "Premium")
+        self.assertEqual(product.brend.nomi, "Premium")
         self.assertEqual(product.tavsif, "Great metal")
         
         # Check supplier
@@ -1979,6 +1979,40 @@ class TaminotchiAPITestCase(APITestCase):
         self.assertEqual(Decimal(response.data["umumiy_tolovlar_summasi"]), Decimal("600.00"))
         self.assertEqual(Decimal(response.data["umumiy_qarz_summasi"]), Decimal("400.00"))
 
+    def test_supplier_soft_delete_and_restore(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
+        detail_url = reverse('suppliers-detail', kwargs={'pk': self.taminotchi.id})
+        
+        # Delete (soft delete)
+        res_del = self.client.delete(detail_url)
+        self.assertEqual(res_del.status_code, status.HTTP_200_OK)
+        
+        self.taminotchi.refresh_from_db()
+        self.assertFalse(self.taminotchi.is_active)
+        
+        # Check active list (should be empty now)
+        res_list = self.client.get(self.list_url)
+        self.assertEqual(len(res_list.data), 0)
+        
+        # Check Archive List
+        archive_url = reverse('archive-list')
+        res_archive = self.client.get(archive_url)
+        self.assertEqual(res_archive.status_code, status.HTTP_200_OK)
+        archived_supplier = [item for item in res_archive.data if item.get('tur') == "Ta'minotchi" and item.get('id') == self.taminotchi.id]
+        self.assertEqual(len(archived_supplier), 1)
+        
+        # Restore
+        restore_url = reverse('suppliers-restore', kwargs={'pk': self.taminotchi.id})
+        res_restore = self.client.post(restore_url)
+        self.assertEqual(res_restore.status_code, status.HTTP_200_OK)
+        
+        self.taminotchi.refresh_from_db()
+        self.assertTrue(self.taminotchi.is_active)
+        
+        # Check active list (should be present)
+        res_list_after = self.client.get(self.list_url)
+        self.assertEqual(len(res_list_after.data), 1)
+
     def test_supplier_list_dynamic_pagination(self):
         self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
         
@@ -2501,6 +2535,134 @@ class OmborgaKirimAPITestCase(APITestCase):
         self.assertEqual(res_stats.status_code, status.HTTP_200_OK)
         self.assertEqual(res_stats.data['cheklar'], 1)
         self.assertEqual(res_stats.data['soni'], 32)
+
+
+class CategorySoftDeleteAPITestCase(APITestCase):
+    def setUp(self):
+        from user.models import Biznes, Xodim, Tarif
+        from products.models import MahsulotToifasi
+        from rest_framework.authtoken.models import Token
+        from django.contrib.auth.models import User
+
+        self.tarif = Tarif.objects.create(nomi="Pro", dokon_limiti=5, mahsulot_limiti=100, xodim_limiti=5)
+        self.biznes = Biznes.objects.create(nomi="Test Biznes", egasi_ism="Owner", tarif=self.tarif)
+
+        self.u1 = User.objects.create_user(username="cat_user", password="password123")
+        self.x1 = Xodim.objects.create(
+            user=self.u1, ism="Ali", familiya="Valiyev", telefon_raqam="+998901112233", 
+            parol="secret123", jinsi="erkak", biznes=self.biznes, rol="admin"
+        )
+        self.token = Token.objects.create(user=self.u1).key
+        self.cat = MahsulotToifasi.objects.create(biznes=self.biznes, nomi="Qurilish mollari")
+        self.list_url = reverse('toifalar-list')
+
+    def test_category_soft_delete_and_restore(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token)
+        detail_url = reverse('toifalar-detail', kwargs={'pk': self.cat.id})
+
+        # Soft Delete
+        res_del = self.client.delete(detail_url)
+        self.assertEqual(res_del.status_code, status.HTTP_200_OK)
+
+        self.cat.refresh_from_db()
+        self.assertFalse(self.cat.is_active)
+
+        # Active list should be empty
+        res_list = self.client.get(self.list_url)
+        self.assertEqual(len(res_list.data), 0)
+
+        # Archive list should contain the category
+        archive_url = reverse('archive-list')
+        res_archive = self.client.get(archive_url)
+        self.assertEqual(res_archive.status_code, status.HTTP_200_OK)
+        archived_cat = [item for item in res_archive.data if item.get('tur') == "Kategoriya" and item.get('id') == self.cat.id]
+        self.assertEqual(len(archived_cat), 1)
+
+        # Restore
+        restore_url = reverse('toifalar-restore', kwargs={'pk': self.cat.id})
+        res_restore = self.client.post(restore_url)
+        self.assertEqual(res_restore.status_code, status.HTTP_200_OK)
+
+        self.cat.refresh_from_db()
+        self.assertTrue(self.cat.is_active)
+
+
+class BrandSoftDeleteAPITestCase(APITestCase):
+    def setUp(self):
+        from user.models import Biznes, Xodim, Tarif
+        from products.models import MahsulotBrend, Mahsulot, Dokon
+        from rest_framework.authtoken.models import Token
+        from django.contrib.auth.models import User
+
+        self.tarif = Tarif.objects.create(nomi="Pro", dokon_limiti=5, mahsulot_limiti=100, xodim_limiti=5)
+        self.biznes = Biznes.objects.create(nomi="Test Biznes", egasi_ism="Owner", tarif=self.tarif)
+
+        self.u1 = User.objects.create_user(username="brand_user", password="password123")
+        self.x1 = Xodim.objects.create(
+            user=self.u1, ism="Ali", familiya="Valiyev", telefon_raqam="+998901119988", 
+            parol="secret123", jinsi="erkak", biznes=self.biznes, rol="admin"
+        )
+        self.token = Token.objects.create(user=self.u1).key
+        self.dokon = Dokon.objects.create(biznes=self.biznes, nomi="Asosiy do'kon")
+        self.brand = MahsulotBrend.objects.create(biznes=self.biznes, nomi="Samsung")
+        self.list_url = reverse('brendlar-list')
+
+    def test_brand_soft_delete_and_restore(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token)
+        detail_url = reverse('brendlar-detail', kwargs={'pk': self.brand.id})
+
+        # Soft Delete
+        res_del = self.client.delete(detail_url)
+        self.assertEqual(res_del.status_code, status.HTTP_200_OK)
+
+        self.brand.refresh_from_db()
+        self.assertFalse(self.brand.is_active)
+
+        # Active list should be empty
+        res_list = self.client.get(self.list_url)
+        self.assertEqual(len(res_list.data), 0)
+
+        # Archive list should contain the brand
+        archive_url = reverse('archive-list')
+        res_archive = self.client.get(archive_url)
+        self.assertEqual(res_archive.status_code, status.HTTP_200_OK)
+        archived_brand = [item for item in res_archive.data if item.get('tur') == "Brend" and item.get('id') == self.brand.id]
+        self.assertEqual(len(archived_brand), 1)
+
+        # Restore
+        restore_url = reverse('brendlar-restore', kwargs={'pk': self.brand.id})
+        res_restore = self.client.post(restore_url)
+        self.assertEqual(res_restore.status_code, status.HTTP_200_OK)
+
+        self.brand.refresh_from_db()
+        self.assertTrue(self.brand.is_active)
+
+    def test_brand_choice_only_validation(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token)
+        prod_create_url = reverse('mahsulot-list')
+
+        # Attempt to create product with existing brand
+        payload = {
+            "nomi": "Galaxy S24",
+            "brend": "Samsung",
+            "kelish_narxi": "800.00",
+            "sotish_narxi": "1000.00"
+        }
+        res = self.client.post(prod_create_url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['brend_nomi'], "Samsung")
+
+        # Attempt to create product with NON-EXISTENT brand
+        payload_invalid = {
+            "nomi": "iPhone 15",
+            "brend": "NonExistentBrand123",
+            "kelish_narxi": "800.00",
+            "sotish_narxi": "1000.00"
+        }
+        res_invalid = self.client.post(prod_create_url, payload_invalid, format='json')
+        self.assertEqual(res_invalid.status_code, status.HTTP_400_BAD_REQUEST)
+        errs = res_invalid.data.get('errors', res_invalid.data)
+        self.assertIn("brend", errs)
 
 
 

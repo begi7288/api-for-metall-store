@@ -69,6 +69,26 @@ class Sale(BaseModel):
         
         super().save(*args, **kwargs)
 
+        # Nasiyaga sotilgan bo'lsa va mijoz bo'lsa -> MijozQarzi yaratish/yangilash
+        if self.nasiya_summa > Decimal('0.00') and self.mijoz:
+            from user.models import MijozQarzi
+            qarz, created = MijozQarzi.objects.get_or_create(
+                sotuv=self,
+                defaults={
+                    'biznes': self.biznes,
+                    'mijoz': self.mijoz,
+                    'umumiy_summa': self.nasiya_summa,
+                    'tolangan_summa': Decimal('0.00'),
+                    'qoldiq_summa': self.nasiya_summa,
+                    'holat': 'tolanmagan'
+                }
+            )
+            if not created:
+                qarz.biznes = self.biznes
+                qarz.mijoz = self.mijoz
+                qarz.umumiy_summa = self.nasiya_summa
+                qarz.save()
+
     def __str__(self):
         return f"Sotuv #{self.kod} ({self.get_holat_display()})"
 

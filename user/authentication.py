@@ -9,7 +9,8 @@ class ExpiringTokenAuthentication(TokenAuthentication):
     Expired tokens are automatically removed from the database when used,
     forcing the user to re-authenticate.
     """
-    TOKEN_TTL_HOURS = 6
+    TOKEN_TTL_HOURS = 720  # 30 kun (720 soat)
+
 
     def authenticate_credentials(self, key):
         model = self.get_model()

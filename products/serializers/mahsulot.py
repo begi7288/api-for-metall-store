@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.core.exceptions import ValidationError
 from decimal import Decimal
-from products.models import Mahsulot, Characteristic, MahsulotRasm, MahsulotShtrixKod, DokonQoldiq, OlchovBirligi
+from products.models import Mahsulot, Characteristic, MahsulotRasm, MahsulotShtrixKod, DokonQoldiq, OlchovBirligi, MahsulotBrend
 from user.serializers import XSSSanitizerMixin
 
 class OlchovBirligiRelatedField(serializers.PrimaryKeyRelatedField):
@@ -14,12 +14,31 @@ class OlchovBirligiRelatedField(serializers.PrimaryKeyRelatedField):
             biznes = request.user.xodim.biznes if (request and request.user and hasattr(request.user, 'xodim')) else None
             
             val_clean = data.strip().lower()
-            unit_obj, created = OlchovBirligi.objects.get_or_create(
-                biznes=biznes,
-                short_name=val_clean,
-                defaults={'nomi': data.strip().capitalize()}
-            )
-            return unit_obj
+            qs = OlchovBirligi.objects.filter(biznes=biznes) if biznes else OlchovBirligi.objects.all()
+            unit_obj = qs.filter(short_name__iexact=val_clean).first() or qs.filter(nomi__iexact=data.strip()).first()
+            if unit_obj:
+                return unit_obj
+            raise serializers.ValidationError("Bunday o'lchov birligi mavjud emas. Faqat mavjud o'lchov birliklaridan tanlang.")
+        
+        return super().to_internal_value(data)
+
+class MahsulotBrendRelatedField(serializers.PrimaryKeyRelatedField):
+    def to_internal_value(self, data):
+        if data is None or data == '' or data == 'Mavjud emas':
+            return None
+        if isinstance(data, int) or (isinstance(data, str) and data.isdigit()):
+            return super().to_internal_value(data)
+        
+        if isinstance(data, str):
+            request = self.context.get('request')
+            biznes = request.user.xodim.biznes if (request and request.user and hasattr(request.user, 'xodim')) else None
+            
+            val_clean = data.strip()
+            qs = MahsulotBrend.objects.filter(biznes=biznes) if biznes else MahsulotBrend.objects.all()
+            brand_obj = qs.filter(nomi__iexact=val_clean).first()
+            if brand_obj:
+                return brand_obj
+            raise serializers.ValidationError("Bunday brend mavjud emas. Faqat mavjud brendlardan tanlang.")
         
         return super().to_internal_value(data)
 
@@ -188,6 +207,10 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     shtrix_kod = MultiBarcodeField(required=False, style={'multiple': True})
     qoldiqlar = DokonQoldiqWriteSerializer(many=True, required=False)
     olchov_birligi = OlchovBirligiRelatedField(queryset=OlchovBirligi.objects.all(), required=False, allow_null=True)
+    brend = MahsulotBrendRelatedField(queryset=MahsulotBrend.objects.all(), required=False, allow_null=True)
+    brend_nomi = serializers.SerializerMethodField()
+    brend_id = serializers.ReadOnlyField(source='brend.id')
+    brendNomi = serializers.SerializerMethodField()
     characteristics = serializers.PrimaryKeyRelatedField(
         many=True,
         queryset=Characteristic.objects.all(),
@@ -195,6 +218,12 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     )
     taminotchi_nomi = serializers.ReadOnlyField(source='taminotchi.nomi')
     dokon = serializers.SerializerMethodField()
+
+    def get_brend_nomi(self, obj):
+        return obj.brend.nomi if obj.brend else "Mavjud emas"
+
+    def get_brendNomi(self, obj):
+        return obj.brend.nomi if obj.brend else "Mavjud emas"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -204,6 +233,7 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             from products.models import Taminotchi
             self.fields['taminotchi'].queryset = Taminotchi.objects.filter(biznes=biznes)
             self.fields['olchov_birligi'].queryset = OlchovBirligi.objects.filter(biznes=biznes)
+            self.fields['brend'].queryset = MahsulotBrend.objects.filter(biznes=biznes)
 
     holat_rangi = serializers.SerializerMethodField()
 
@@ -231,7 +261,7 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         fields = [
             'id', 'biznes', 'nomi', 'shtrix_kod', 'olchov_birligi', 'rasm',
             'kelish_narxi', 'ustama', 'sotish_narxi', 'ulgurji_narx', 'miqdori',
-            'ogohlantirish', 'is_active', 'toifa', 'brend', 'taminotchi', 'taminotchi_nomi',
+            'ogohlantirish', 'is_active', 'toifa', 'brend', 'brend_nomi', 'brend_id', 'brendNomi', 'taminotchi', 'taminotchi_nomi',
             'erkin_narx', 'tavsif', 'characteristics', 'qoldiqlar', 'yaratilgan_vaqt',
             'yangilangan_vaqt', 'kam_qoldi', 'dokon', 'holat_rangi'
         ]
@@ -368,6 +398,18 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         attrs['sotish_narxi'] = temp_instance.sotish_narxi
         
         return attrs
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.brend:
+            ret['brend'] = instance.brend.nomi
+            ret['brend_id'] = instance.brend.id
+            ret['brend_nomi'] = instance.brend.nomi
+        else:
+            ret['brend'] = "Mavjud emas"
+            ret['brend_id'] = None
+            ret['brend_nomi'] = "Mavjud emas"
+        return ret
 
     def get_dokon(self, obj):
         request = self.context.get('request')

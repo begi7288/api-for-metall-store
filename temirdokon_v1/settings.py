@@ -132,20 +132,42 @@ WSGI_APPLICATION = 'temirdokon_v1.wsgi.application'
 
 import dj_database_url
 
+import socket
+
+# Default database: local SQLite
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            'timeout': 30,
+        }
     }
 }
 
-# If DATABASE_URL environment variable is provided, use PostgreSQL (CRIT-5)
+# If running directly on Render cloud server, default DB is PostgreSQL. On local machine, remote PostgreSQL is mapped as remote_cloud.
+IS_RENDER = os.environ.get('RENDER') or os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
 if DATABASE_URL:
-    DATABASES['default'] = dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
-    # Enforce SSL for Render PostgreSQL
-    if DATABASES['default'].get('ENGINE') == 'django.db.backends.postgresql':
-        DATABASES['default'].setdefault('OPTIONS', {})['sslmode'] = 'require'
+    db_config = dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
+    if db_config.get('ENGINE') == 'django.db.backends.postgresql':
+        db_config.setdefault('OPTIONS', {})['sslmode'] = 'require'
+    db_config.update({
+        'AUTOCOMMIT': True,
+        'ATOMIC_REQUESTS': False,
+        'TIME_ZONE': 'UTC',
+        'CONN_MAX_AGE': 600,
+        'CONN_HEALTH_CHECKS': False,
+    })
+
+
+    if IS_RENDER:
+        DATABASES['default'] = db_config
+    else:
+        DATABASES['remote_cloud'] = db_config
+
+
 
 
 # Password validation

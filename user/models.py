@@ -60,7 +60,8 @@ class Biznes(BaseModel):
     def save(self, *args, **kwargs):
         is_new = not self.pk
         super().save(*args, **kwargs)
-        if is_new:
+        if is_new and not kwargs.get('raw', False):
+
             from products.models import OlchovBirligi
             from user.models import XodimRoli
             defaults_units = [
@@ -192,8 +193,6 @@ class Mijoz(BaseModel):
     telefon_raqam_1 = models.CharField(max_length=13)
     telefon_raqam_2 = models.CharField(max_length=13, blank=True, null=True)
     manzil = models.CharField(max_length=255, blank=True, null=True)
-    guruhlar = models.CharField(max_length=255, blank=True, null=True)
-    teglar = models.CharField(max_length=255, blank=True, null=True)
 
     def clean(self):
         super().clean()
@@ -314,6 +313,7 @@ class MijozTolovi(BaseModel):
     TOLOV_USULI_CHOICES = (
         ('naqd', 'Naqd'),
         ('karta', 'Karta'),
+        ('click', 'Click'),
         ('aralash', 'Aralash'),
     )
     biznes = models.ForeignKey(Biznes, on_delete=models.CASCADE, related_name='mijoz_tolovlari', null=True, blank=True)
