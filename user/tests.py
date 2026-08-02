@@ -1100,6 +1100,51 @@ class BotVerificationAPITestCase(APITestCase):
         self.assertEqual(xodim.biznes.nomi, "Yangi Metall")
 
 
+class PinLoginAPITest(APITestCase):
+    def setUp(self):
+        from user.views import LoginAPIView
+        LoginAPIView.throttle_classes = []
+        self.biznes = Biznes.objects.create(nomi="Test Biznes", egasi_ism="Botir")
+        self.xodim = Xodim.objects.create(
+            biznes=self.biznes,
+            ism="Botir",
+            familiya="Kamilov",
+            telefon_raqam="+998931112233",
+            parol="StandardPass123",
+            pin_kod="5555",
+            rol="sotuvchi",
+            jinsi="erkak"
+        )
+
+    def test_pin_login_with_phone_and_pin(self):
+        url = reverse('login')
+        response = self.client.post(url, {
+            'telefon_raqam': '+998931112233',
+            'pin_kod': '5555'
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['pin_kod'], '5555')
+        self.assertEqual(response.data['ism'], 'Botir')
+
+    def test_pin_login_with_pin_only(self):
+        url = reverse('login')
+        response = self.client.post(url, {
+            'pin_kod': '5555'
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['ism'], 'Botir')
+
+    def test_pin_login_with_invalid_pin(self):
+        url = reverse('login')
+        response = self.client.post(url, {
+            'pin_kod': '0000'
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+
 
 
 

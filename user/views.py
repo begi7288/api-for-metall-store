@@ -35,63 +35,95 @@ class LoginAPIView(APIView):
         from django.contrib.auth.models import User
         from django.utils import timezone
         from datetime import timedelta
+        from rest_framework.authtoken.models import Token
+        from django.contrib.auth.hashers import check_password
 
-        telefon_raqam = serializer.validated_data['telefon_raqam']
-        parol = serializer.validated_data['parol']
+        telefon_raqam = serializer.validated_data.get('telefon_raqam', '').strip()
+        parol = str(serializer.validated_data.get('parol', '')).strip()
+        pin_val = str(request.data.get('pin_kod') or request.data.get('pin_code') or request.data.get('pin') or parol).strip()
 
-        # MED-6: Constant-time response to prevent phone enumeration via timing attack
-        start_time = time.monotonic()
+        GENERIC_ERROR = "Telefon raqami yoki parol/PIN-kod noto'g'ri."
 
-        # Generic error message — same for wrong phone AND wrong password (MED-6)
-        GENERIC_ERROR = "Telefon raqami yoki parol noto'g'ri."
-
-        phone_formats = []
-        clean_phone = telefon_raqam.strip().replace('+', '')
-        if clean_phone.isdigit():
-            if len(clean_phone) == 9:
-                phone_formats.extend([clean_phone, f"+998{clean_phone}", f"998{clean_phone}"])
-            elif len(clean_phone) == 12 and clean_phone.startswith('998'):
-                phone_formats.extend([clean_phone, f"+{clean_phone}", clean_phone[3:]])
-            else:
-                phone_formats.append(telefon_raqam)
-        else:
-            phone_formats.append(telefon_raqam)
-            
-        phone_formats = list(set(phone_formats))
+        user_obj = None
+        xodim = None
+        role = 'sotuvchi'
+        ism = None
+        familiya = None
 
         try:
-            xodim = Xodim.objects.filter(telefon_raqam__in=phone_formats).first()
-            if xodim:
-                user_obj = xodim.user
-                if not xodim.is_active:
-                    raise PermissionDenied("Ushbu xodim faol emas.")
-                if not check_password(parol, xodim.parol):
-                    raise DRFValidationError({'detail': GENERIC_ERROR})
-                role = xodim.rol
-                ism = xodim.ism
-                familiya = xodim.familiya
-            else:
-                clean_username = telefon_raqam.replace('+', '')
-                user_obj = User.objects.filter(username__in=[telefon_raqam, clean_username]).first()
-                if not user_obj:
-                    # MED-6: Do a dummy password hash check to prevent timing-based enumeration
-                    check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
-                    raise DRFValidationError({'detail': GENERIC_ERROR})
+            if telefon_raqam:
+                phone_formats = []
+                clean_phone = telefon_raqam.replace('+', '')
+                if clean_phone.isdigit():
+                    if len(clean_phone) == 9:
+                        phone_formats.extend([clean_phone, f"+998{clean_phone}", f"998{clean_phone}"])
+                    elif len(clean_phone) == 12 and clean_phone.startswith('998'):
+                        phone_formats.extend([clean_phone, f"+{clean_phone}", clean_phone[3:]])
+                    else:
+                        phone_formats.append(telefon_raqam)
+                else:
+                    phone_formats.append(telefon_raqam)
 
-                if not user_obj.is_active:
-                    raise PermissionDenied("Ushbu foydalanuvchi faol emas.")
-                if not user_obj.check_password(parol):
-                    raise DRFValidationError({'detail': GENERIC_ERROR})
+                phone_formats = list(set(phone_formats))
 
-                if hasattr(user_obj, 'xodim'):
-                    xodim = user_obj.xodim
+                xodim = Xodim.objects.filter(telefon_raqam__in=phone_formats).first()
+                if xodim:
+                    user_obj = xodim.user
+                    if not xodim.is_active:
+                        raise PermissionDenied("Ushbu xodim faol emas.")
+
+                    pwd_valid = check_password(parol, xodim.parol)
+                    pin_valid = bool(xodim.pin_kod) and (xodim.pin_kod == parol or xodim.pin_kod == pin_val)
+
+                    if not (pwd_valid or pin_valid):
+                        raise DRFValidationError({'detail': GENERIC_ERROR})
+
                     role = xodim.rol
                     ism = xodim.ism
                     familiya = xodim.familiya
                 else:
-                    role = 'admin' if user_obj.is_superuser else 'sotuvchi'
-                    ism = user_obj.first_name if user_obj.first_name else None
-                    familiya = user_obj.last_name if user_obj.last_name else None
+                    clean_username = telefon_raqam.replace('+', '')
+                    user_obj = User.objects.filter(username__in=[telefon_raqam, clean_username]).first()
+                    if not user_obj:
+                        check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
+                        raise DRFValidationError({'detail': GENERIC_ERROR})
+
+                    if not user_obj.is_active:
+                        raise PermissionDenied("Ushbu foydalanuvchi faol emas.")
+
+                    pwd_valid = user_obj.check_password(parol)
+                    pin_valid = False
+                    if hasattr(user_obj, 'xodim') and user_obj.xodim.pin_kod:
+                        pin_valid = (user_obj.xodim.pin_kod == parol or user_obj.xodim.pin_kod == pin_val)
+
+                    if not (pwd_valid or pin_valid):
+                        raise DRFValidationError({'detail': GENERIC_ERROR})
+
+                    if hasattr(user_obj, 'xodim'):
+                        xodim = user_obj.xodim
+                        role = xodim.rol
+                        ism = xodim.ism
+                        familiya = xodim.familiya
+                    else:
+                        role = 'admin' if user_obj.is_superuser else 'sotuvchi'
+                        ism = user_obj.first_name if user_obj.first_name else None
+                        familiya = user_obj.last_name if user_obj.last_name else None
+            else:
+                target_pin = pin_val or parol
+                if not target_pin:
+                    raise DRFValidationError({'detail': "PIN-kod kiritilishi shart."})
+
+                xodim_qs = Xodim.objects.filter(pin_kod=target_pin, is_active=True)
+                if xodim_qs.count() == 1:
+                    xodim = xodim_qs.first()
+                    user_obj = xodim.user
+                    role = xodim.rol
+                    ism = xodim.ism
+                    familiya = xodim.familiya
+                elif xodim_qs.count() > 1:
+                    raise DRFValidationError({'detail': "Ushbu PIN-kod bir nechta xodimga biriktirilgan. Iltimos, telefon raqamingizni ham kiriting."})
+                else:
+                    raise DRFValidationError({'detail': GENERIC_ERROR})
 
             token, created = Token.objects.get_or_create(user=user_obj)
             if not created:
@@ -99,13 +131,13 @@ class LoginAPIView(APIView):
                     token.delete()
                     token = Token.objects.create(user=user_obj)
 
-            # MED-1: Session login olib tashlandi — faqat Token auth ishlatiladi
-
             return Response({
                 'token': token.key,
                 'ism': ism,
                 'familiya': familiya,
                 'rol': role,
+                'pin_kod': xodim.pin_kod if xodim else "",
+                'pin_code': xodim.pin_kod if xodim else "",
                 'redirect_url': '/users/me/'
             }, status=status.HTTP_200_OK)
 

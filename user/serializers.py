@@ -33,12 +33,13 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     tel = serializers.ReadOnlyField(source='telefon_raqam')
     holat = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
+    pin_code = serializers.CharField(source='pin_kod', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = Xodim
         fields = [
             'id', 'biznes', 'ism', 'familiya', 'telefon_raqam', 'telefon', 'tel', 'parol', 'parolni_tasdiqlash',
-            'rol', 'jinsi', 'tugilgan_sana', 'is_active', 'fish', 'full_name', 'fullName', 'dokon', 'dokon_nomi',
+            'rol', 'jinsi', 'tugilgan_sana', 'is_active', 'pin_kod', 'pin_code', 'fish', 'full_name', 'fullName', 'dokon', 'dokon_nomi',
             'holat', 'status', 'yaratilgan_vaqt', 'yangilangan_vaqt'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
@@ -247,33 +248,51 @@ class ChangePasswordSerializer(serializers.Serializer):
         return attrs
 
 class LoginSerializer(serializers.Serializer):
-    telefon_raqam = serializers.CharField(required=False, label="Telefon raqami")
+    telefon_raqam = serializers.CharField(required=False, allow_blank=True, allow_null=True, label="Telefon raqami")
     parol = serializers.CharField(
-        required=True,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
         style={'input_type': 'password'},
         label="Parol"
     )
+    pin_kod = serializers.CharField(required=False, allow_blank=True, allow_null=True, label="PIN-kod")
 
     def to_internal_value(self, data):
         data = data.copy() if isinstance(data, dict) else {}
-        if 'username' in data and 'telefon_raqam' not in data:
-            data['telefon_raqam'] = data['username']
-        elif 'login' in data and 'telefon_raqam' not in data:
-            data['telefon_raqam'] = data['login']
 
-        if 'password' in data and 'parol' not in data:
+        if 'username' in data and not data.get('telefon_raqam'):
+            data['telefon_raqam'] = data['username']
+        elif 'login' in data and not data.get('telefon_raqam'):
+            data['telefon_raqam'] = data['login']
+        elif 'phone' in data and not data.get('telefon_raqam'):
+            data['telefon_raqam'] = data['phone']
+
+        if 'password' in data and not data.get('parol'):
             data['parol'] = data['password']
-            
+        elif 'pin_kod' in data and not data.get('parol'):
+            data['parol'] = data['pin_kod']
+        elif 'pin_code' in data and not data.get('parol'):
+            data['parol'] = data['pin_code']
+        elif 'pin' in data and not data.get('parol'):
+            data['parol'] = data['pin']
+
         ret = super().to_internal_value(data)
-        if not ret.get('telefon_raqam'):
-            raise serializers.ValidationError({'telefon_raqam': "Telefon raqami yoki login kiritilishi shart."})
-            
-        if 'telefon_raqam' in ret:
-            phone_val = ret['telefon_raqam']
+
+        parol_val = ret.get('parol') or data.get('pin_kod') or data.get('pin_code') or data.get('pin') or data.get('password')
+        if not parol_val:
+            raise serializers.ValidationError({'parol': "Parol yoki PIN-kod kiritilishi shart."})
+
+        ret['parol'] = str(parol_val).strip()
+
+        if 'telefon_raqam' in ret and ret['telefon_raqam']:
+            phone_val = str(ret['telefon_raqam']).strip()
             phone_val = re.sub(r'[^\d+]', '', phone_val)
             if phone_val.count('+') > 0:
                 phone_val = '+' + phone_val.replace('+', '')
             ret['telefon_raqam'] = phone_val
+        else:
+            ret['telefon_raqam'] = ''
 
         return ret
 
