@@ -164,7 +164,8 @@ class Xodim(BaseModel):
             django_user = self.user
             new_username = self.telefon_raqam.replace('+', '')
             if django_user.username != new_username:
-                django_user.username = new_username
+                if not User.objects.filter(username=new_username).exclude(pk=django_user.pk).exists():
+                    django_user.username = new_username
             if raw_password:
                 django_user.set_password(raw_password)
             django_user.is_active = self.is_active
