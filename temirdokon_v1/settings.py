@@ -130,7 +130,10 @@ WSGI_APPLICATION = 'temirdokon_v1.wsgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 # TODO: Production uchun PostgreSQL ga o'tish tavsiya etiladi (CRIT-5)
 
-import dj_database_url
+try:
+    import dj_database_url
+except ImportError:
+    dj_database_url = None
 
 import socket
 
@@ -149,7 +152,7 @@ DATABASES = {
 IS_RENDER = os.environ.get('RENDER') or os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-if DATABASE_URL:
+if DATABASE_URL and dj_database_url:
     db_config = dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
     if db_config.get('ENGINE') == 'django.db.backends.postgresql':
         db_config.setdefault('OPTIONS', {})['sslmode'] = 'require'
