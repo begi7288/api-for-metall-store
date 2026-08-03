@@ -96,8 +96,8 @@ class SupplierOrder(BaseModel):
         return differences
 
     def qabul_qilish(self, apply_new_prices, executor_employee):
-        if self.holat != 'rasmiylashtirilgan':
-            raise ValidationError("Faqat rasmiylashtirilgan buyurtmalarni qabul qilish mumkin.")
+        if self.holat not in ['qoralama', 'rasmiylashtirilgan']:
+            raise ValidationError("Faqat qoralama yoki rasmiylashtirilgan buyurtmalarni qabul qilish mumkin.")
             
         for item in self.elementlar.all():
             product = item.mahsulot
@@ -124,6 +124,11 @@ class SupplierOrder(BaseModel):
         self.haqiqiy_qabul_sana = now()
         self.qabul_qilgan_xodim = executor_employee
         self.save()
+
+        # If supplier has advance deposit (balans > 0) and order has debt (nasiya_summa > 0), auto-apply balance
+        if self.taminotchi and self.taminotchi.balans > 0 and self.nasiya_summa > 0:
+            use_balans = min(self.taminotchi.balans, self.nasiya_summa)
+            self.add_payment(use_balans, 'balans_postavshika', executor_employee)
 
     def bekor_qilish(self):
         if self.holat == 'qabul_qilingan':

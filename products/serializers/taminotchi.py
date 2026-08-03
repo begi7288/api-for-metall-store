@@ -46,12 +46,13 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         read_only_fields = ['biznes', 'balans', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
     def get_oxirgi_qarz(self, obj):
-        last_unpaid = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').filter(nasiya_summa__gt=0).order_by('-yaratilgan_vaqt').first()
+        from django.db.models import F
+        last_unpaid = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').filter(umumiy_summa__gt=F('tolangan_summa')).order_by('-yaratilgan_vaqt').first()
         if last_unpaid:
-            return last_unpaid.nasiya_summa
+            return max(Decimal('0.00'), last_unpaid.umumiy_summa - last_unpaid.tolangan_summa)
         last_order = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').order_by('-yaratilgan_vaqt').first()
         if last_order:
-            return last_order.nasiya_summa
+            return max(Decimal('0.00'), last_order.umumiy_summa - last_order.tolangan_summa)
         return Decimal('0.00')
 
     def get_oxirgiQarz(self, obj):
@@ -64,8 +65,13 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         return self.get_jami_qarz(obj)
 
     def get_qarz_summasi(self, obj):
-        from django.db.models import Sum
-        return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('nasiya_summa'))['total'] or Decimal('0.00')
+        from django.db.models import Sum, F, ExpressionWrapper, DecimalField
+        order_qarz = obj.xarid_buyurtmalari.exclude(
+            holat='bekor_qilingan'
+        ).aggregate(
+            total=Sum(ExpressionWrapper(F('umumiy_summa') - F('tolangan_summa'), output_field=DecimalField()))
+        )['total'] or Decimal('0.00')
+        return max(Decimal('0.00'), order_qarz - obj.balans)
 
     def get_buyurtmalar_summasi(self, obj):
         from django.db.models import Sum

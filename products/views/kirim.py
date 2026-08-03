@@ -79,10 +79,34 @@ class KirimViewSet(viewsets.ModelViewSet):
         try:
             kirim_obj.confirm_and_execute(executor_xodim=executor_xodim)
             
-            # If supplier & payment method is 'nasiya', track supplier debt
-            if kirim_obj.taminotchi and kirim_obj.tolov_turi == 'nasiya':
-                kirim_obj.taminotchi.balans += kirim_obj.kelish_summasi
-                kirim_obj.taminotchi.save(update_fields=['balans'])
+            # If supplier is set, create a SupplierOrder to properly record purchase debt and payments
+            if kirim_obj.taminotchi:
+                from orders.models import SupplierOrder
+                from django.utils import timezone
+
+                is_nasiya = (kirim_obj.tolov_turi == 'nasiya')
+                paid_amt = Decimal('0.00') if is_nasiya else kirim_obj.kelish_summasi
+                debt_amt = kirim_obj.kelish_summasi if is_nasiya else Decimal('0.00')
+
+                so = SupplierOrder.objects.create(
+                    biznes=kirim_obj.biznes,
+                    taminotchi=kirim_obj.taminotchi,
+                    dokon=kirim_obj.dokon,
+                    nomi=f"Kirim #{kirim_obj.chek_raqami or kirim_obj.id}",
+                    holat='qabul_qilingan',
+                    qabul_qilish_sanasi=timezone.now().date(),
+                    haqiqiy_qabul_sana=timezone.now(),
+                    yaratgan_xodim=kirim_obj.yaratgan_xodim,
+                    qabul_qilgan_xodim=executor_xodim,
+                    umumiy_summa=kirim_obj.kelish_summasi,
+                    tolangan_summa=paid_amt,
+                    nasiya_summa=debt_amt
+                )
+
+                # If debt exists and supplier has advance deposit (balans > 0), auto-apply balance
+                if is_nasiya and kirim_obj.taminotchi.balans > 0 and so.nasiya_summa > 0:
+                    use_balans = min(kirim_obj.taminotchi.balans, so.nasiya_summa)
+                    so.add_payment(use_balans, 'balans_postavshika', executor_xodim)
 
         except Exception as e:
             raise DRFValidationError({'detail': str(e)})

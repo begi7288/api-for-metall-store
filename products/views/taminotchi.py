@@ -103,8 +103,9 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
 
         employee = request.user.xodim if hasattr(request.user, 'xodim') else None
 
-        orders = taminotchi.xarid_buyurtmalari.filter(
-            holat__in=['rasmiylashtirilgan', 'qabul_qilingan'],
+        orders = taminotchi.xarid_buyurtmalari.exclude(
+            holat='bekor_qilingan'
+        ).filter(
             nasiya_summa__gt=0
         ).order_by('yaratilgan_vaqt')
 
@@ -168,14 +169,16 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
             nasiya_summa__gt=0
         ).count()
 
+        from django.db.models import F, ExpressionWrapper, DecimalField
         sums = taminotchi.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(
             buyurtmalar=Sum('umumiy_summa'),
             tolovlar=Sum('tolangan_summa'),
-            qarz=Sum('nasiya_summa')
+            qarz=Sum(ExpressionWrapper(F('umumiy_summa') - F('tolangan_summa'), output_field=DecimalField()))
         )
         buyurtmalar_summasi = sums['buyurtmalar'] or Decimal('0.00')
         tolovlar_summasi = sums['tolovlar'] or Decimal('0.00')
-        qarz_summasi = sums['qarz'] or Decimal('0.00')
+        raw_qarz = sums['qarz'] or Decimal('0.00')
+        qarz_summasi = max(Decimal('0.00'), raw_qarz - balans)
 
         ordered_qty = taminotchi.xarid_buyurtmalari.filter(
             holat__in=['qoralama', 'rasmiylashtirilgan']
@@ -412,7 +415,7 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
     def stats(self, request):
         queryset = self.filter_queryset(self.get_queryset())
         
-        from django.db.models import Sum
+        from django.db.models import Sum, F, ExpressionWrapper, DecimalField
         from orders.models import SupplierOrder
         
         taminotchi_ids = queryset.values_list('id', flat=True)
@@ -424,7 +427,7 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
         sums = orders.aggregate(
             buyurtmalar=Sum('umumiy_summa'),
             tolovlar=Sum('tolangan_summa'),
-            qarz=Sum('nasiya_summa')
+            qarz=Sum(ExpressionWrapper(F('umumiy_summa') - F('tolangan_summa'), output_field=DecimalField()))
         )
         
         return Response({
