@@ -91,39 +91,48 @@ def send_telegram_message(text: str, chat_id=None, reply_markup=None):
 
 def send_business_telegram_notification(biznes, text: str):
     """
-    Sends a notification to all active Telegram users linked to the given business.
+    Sends a notification to all active Telegram users/sessions linked to the given business.
     Falls back to global TELEGRAM_CHAT_ID if no active linked user is found.
     """
     if not biznes:
         send_telegram_message(text)
         return
 
-    from user.models import Xodim
-    # Priority 1: Send to business admins
-    admins = Xodim.objects.filter(
-        biznes=biznes,
-        is_active=True,
-        rol='admin',
-        telegram_notifications_enabled=True
-    ).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+    from user.models import Xodim, TelegramSession
 
-    target_xodims = admins if admins.exists() else Xodim.objects.filter(
-        biznes=biznes,
-        is_active=True,
-        telegram_notifications_enabled=True
-    ).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
-
-    sent_any = False
     sent_chats = set()
-    for xodim in target_xodims:
-        cid = str(xodim.telegram_chat_id).strip()
-        if cid and cid not in sent_chats:
-            sent_chats.add(cid)
-            send_telegram_message(text, chat_id=cid)
-            sent_any = True
 
-    if not sent_any:
-        # Fallback to default configured chat ID if available
+    # 1. Check authenticated TelegramSessions for this business
+    active_sessions = TelegramSession.objects.filter(
+        xodim__biznes=biznes,
+        xodim__is_active=True,
+        xodim__telegram_notifications_enabled=True,
+        state='AUTHENTICATED'
+    ).select_related('xodim')
+
+    for sess in active_sessions:
+        cid = str(sess.chat_id).strip()
+        if cid:
+            sent_chats.add(cid)
+
+    # 2. Check Xodim.telegram_chat_id for this business
+    xodims = Xodim.objects.filter(
+        biznes=biznes,
+        is_active=True,
+        telegram_notifications_enabled=True
+    ).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+
+    for x in xodims:
+        cid = str(x.telegram_chat_id).strip()
+        if cid:
+            sent_chats.add(cid)
+
+    # Send to all gathered user chat IDs
+    if sent_chats:
+        for cid in sent_chats:
+            send_telegram_message(text, chat_id=cid)
+    else:
+        # Fallback to default configured chat ID if no user session is found
         send_telegram_message(text)
 
 
