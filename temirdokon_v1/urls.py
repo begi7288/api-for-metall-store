@@ -22,7 +22,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 from user.extra_views import CategoriesViewSet, UnitsViewSet, RolesViewSet, BrandsViewSet, ArchiveListAPIView
 from products.views.taminotchi import TaminotchiViewSet
 
-from user.views import XodimViewSet, RegisterRequestAPIView, VerifyCEOAPIView
+from user.views import XodimViewSet, RegisterRequestAPIView, VerifyCEOAPIView, TelegramWebhookAPIView
 
 urlpatterns = [
     path('auth/register-request/', RegisterRequestAPIView.as_view(), name='register-request'),
@@ -76,6 +76,9 @@ urlpatterns = [
     path('olchov-birliklari/<int:pk>/', UnitsViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='olchov-birliklari-detail'),
     
     path('archive/', ArchiveListAPIView.as_view(), name='archive-list'),
+    path('telegram/webhook/', TelegramWebhookAPIView.as_view(), name='telegram-webhook-root'),
+    path('api/v1/telegram/webhook/', TelegramWebhookAPIView.as_view(), name='telegram-webhook-v1'),
+    path('users/telegram/webhook/', TelegramWebhookAPIView.as_view(), name='telegram-webhook-users'),
     
     # Swagger & Open API 3 Endpoints
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
