@@ -186,3 +186,18 @@ class TelegramBotTestCase(TestCase):
             sotish_summasi=Decimal("20000.00")
         )
         notify_write_off(wo1)
+
+    def test_get_recent_sales_uses_kod(self):
+        from user.telegram_bot import get_recent_sales_for_biznes
+        sale = Sale.objects.create(
+            biznes=self.biznes1,
+            dokon=self.dokon1,
+            xodim=self.xodim1,
+            kod="SOTUV-CODE-999",
+            yakuniy_summa=Decimal("50000.00"),
+            tolov_usuli="naqd"
+        )
+        result = get_recent_sales_for_biznes(self.biznes1)
+        self.assertIn("#SOTUV-CODE-999", result)
+        self.assertNotIn(f"#{sale.id} (", result)
+

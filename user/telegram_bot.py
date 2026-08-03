@@ -329,7 +329,7 @@ def get_recent_sales_for_biznes(biznes, limit=5):
         v_str = s.yaratilgan_vaqt.strftime("%d.%m %H:%M") if s.yaratilgan_vaqt else ""
         x_ism = s.xodim.ism if s.xodim else "Noma'lum"
         lines.append(
-            f"🔹 <b>#{s.id} ({v_str})</b>\n"
+            f"🔹 <b>#{s.kod} ({v_str})</b>\n"
             f"   👤 Xodim: {x_ism} | 💳 To'lov: {s.get_tolov_usuli_display()}\n"
             f"   💰 Summa: <code>{s.yakuniy_summa:,.0f}</code> so'm\n"
         )
