@@ -99,7 +99,15 @@ def send_business_telegram_notification(biznes, text: str):
         return
 
     from user.models import Xodim
-    xodimlar = Xodim.objects.filter(
+    # Priority 1: Send to business admins
+    admins = Xodim.objects.filter(
+        biznes=biznes,
+        is_active=True,
+        rol='admin',
+        telegram_notifications_enabled=True
+    ).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+
+    target_xodims = admins if admins.exists() else Xodim.objects.filter(
         biznes=biznes,
         is_active=True,
         telegram_notifications_enabled=True
@@ -107,7 +115,7 @@ def send_business_telegram_notification(biznes, text: str):
 
     sent_any = False
     sent_chats = set()
-    for xodim in xodimlar:
+    for xodim in target_xodims:
         cid = str(xodim.telegram_chat_id).strip()
         if cid and cid not in sent_chats:
             sent_chats.add(cid)
