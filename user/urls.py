@@ -4,7 +4,7 @@ from .views import (
     XodimViewSet, MijozViewSet, LoginAPIView, PinLoginAPIView, LogoutAPIView, MeAPIView, ChangePasswordAPIView, RegisterAPIView,
     BiznesViewSet, TarifViewSet, BiznesSettingsAPIView, TarifSettingsAPIView, ChekSettingsAPIView,
     ValyutaSettingsAPIView, TolovTuriSettingsAPIView, MahsulotSettingsAPIView, BildirishnomaSettingsAPIView,
-    IlovalarSettingsAPIView, ClearDatabaseAPIView, GuruhViewSet, TegViewSet
+    IlovalarSettingsAPIView, ClearDatabaseAPIView, GuruhViewSet, TegViewSet, TelegramWebhookAPIView
 )
 from user.extra_views import RolesViewSet, CategoriesViewSet, UnitsViewSet, BrandsViewSet
 from products.views.taminotchi import TaminotchiViewSet
@@ -73,5 +73,6 @@ urlpatterns = [
     path('sync/push/', SyncPushAPIView.as_view(), name='sync-push'),
     path('sync/restore/', SyncRestoreAPIView.as_view(), name='sync-restore'),
     path('sync/status/', SyncStatusAPIView.as_view(), name='sync-status'),
+    path('telegram/webhook/', TelegramWebhookAPIView.as_view(), name='telegram-webhook'),
     path('', include(router.urls)),
 ]

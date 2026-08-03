@@ -106,6 +106,9 @@ class Xodim(BaseModel):
     pin_kod = models.CharField(max_length=10, blank=True, null=True)
     til = models.CharField(max_length=20, default='O\'zbekcha', blank=True, null=True)
     mavzu = models.CharField(max_length=20, default='Yorug\'', blank=True, null=True)
+    telegram_chat_id = models.CharField(max_length=50, blank=True, null=True, db_index=True)
+    telegram_notifications_enabled = models.BooleanField(default=True)
+
 
     def clean(self):
         super().clean()
@@ -442,4 +445,20 @@ class Teg(BaseModel):
 
     def __str__(self):
         return self.nomi
+
+
+class TelegramSession(BaseModel):
+    STATE_CHOICES = (
+        ('AWAITING_PHONE', 'Telefon kutilmoqda'),
+        ('AWAITING_PASSWORD', 'Parol kutilmoqda'),
+        ('AUTHENTICATED', 'Avtorizatsiyadan o\'tgan'),
+    )
+    chat_id = models.CharField(max_length=50, unique=True, db_index=True)
+    xodim = models.ForeignKey(Xodim, on_delete=models.SET_NULL, null=True, blank=True, related_name='telegram_sessions')
+    state = models.CharField(max_length=50, choices=STATE_CHOICES, default='AWAITING_PHONE')
+    temp_phone = models.CharField(max_length=20, blank=True, null=True)
+
+    def __str__(self):
+        return f"TelegramSession(chat_id={self.chat_id}, state={self.state}, xodim={self.xodim})"
+
 

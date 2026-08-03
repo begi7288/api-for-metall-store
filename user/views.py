@@ -10,7 +10,7 @@ from .serializers import XodimSerializer, MijozSerializer, ChangePasswordSeriali
 from .permissions import IsAdminOrOmborchi, IsEmployee
 
 from .throttling import PhoneRateThrottle, IPLoginRateThrottle, PasswordChangeRateThrottle, RegisterRateThrottle
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authentication import SessionAuthentication
 from .authentication import ExpiringTokenAuthentication
 import time
@@ -1348,4 +1348,20 @@ class TegViewSet(viewsets.ModelViewSet):
         if self.request.user and hasattr(self.request.user, 'xodim'):
             biznes = self.request.user.xodim.biznes
         serializer.save(biznes=biznes)
+
+
+class TelegramWebhookAPIView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request, *args, **kwargs):
+        from user.telegram_bot import process_telegram_update
+        update_data = request.data
+        if isinstance(update_data, dict):
+            process_telegram_update(update_data)
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+    def get(self, request, *args, **kwargs):
+        return Response({"status": "Telegram webhook active"}, status=status.HTTP_200_OK)
+
 
