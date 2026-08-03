@@ -581,7 +581,7 @@ class SaleViewSet(viewsets.ModelViewSet):
             prod_val = Mahsulot.objects.filter(biznes=biznes, miqdori__gt=0, kelish_narxi__gt=0, yaratilgan_vaqt__date=cur_date).aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
             chiqim = x_val + sp_val + wo_val + prod_val
 
-            sof = max(Decimal('0.00'), kirim - chiqim)
+            sof = kirim - chiqim
 
             daily_list.append({
                 'sana': cur_date.strftime("%Y-%m-%d"),
