@@ -10,4 +10,6 @@ class UserConfig(AppConfig):
         if os.environ.get('RUN_MAIN') == 'true' or os.environ.get('SERVER_GATEWAY_INTERFACE'):
             from user.auto_sync_background import start_auto_sync_background
             start_auto_sync_background(interval=30)
+            from user.telegram_bot_background import start_telegram_bot_background
+            start_telegram_bot_background()
 

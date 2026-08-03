@@ -459,7 +459,11 @@ class RegisterRequestAPIView(APIView):
             f"🏢 Biznes: {actual_biznes_nomi}\n"
             f"💬 Tasdiqlash kodi: <code>{code}</code>"
         )
-        send_telegram_message(msg)
+        target_chat = None
+        existing = Xodim.objects.filter(telefon_raqam=telefon_raqam).first()
+        if existing and existing.telegram_chat_id:
+            target_chat = existing.telegram_chat_id
+        send_telegram_message(msg, chat_id=target_chat)
         
         return Response({
             "status": "Verification code sent.",
