@@ -1,24 +1,23 @@
-FROM node:20-alpine AS builder
-WORKDIR /usr/src/app
-COPY package.json package-lock.json ./
-RUN npm install
-COPY . .
-RUN mkdir -p uploads
-RUN npm run build
+FROM python:3.12-slim
 
-FROM node:20-alpine AS runner
-WORKDIR /usr/src/app
-COPY package.json package-lock.json ./
-ENV NODE_ENV=production
-# Install runtime system libs required by Prisma (libssl, CA certs, glibc helpers)
-# Keep the image small by using --no-cache and installing only runtime packages.
-RUN apk add --no-cache openssl ca-certificates libgcc libstdc++ \
-	&& update-ca-certificates || true
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Install production node modules
-RUN npm install --production
-COPY --from=builder /usr/src/app/dist ./dist
-COPY --from=builder /usr/src/app/uploads ./uploads
-COPY --from=builder /usr/src/app/prisma ./prisma
-EXPOSE 3000
-CMD ["npm", "start"]
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project code
+COPY . /app/
+
+EXPOSE 8000
+
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "temirdokon_v1.wsgi:application"]
