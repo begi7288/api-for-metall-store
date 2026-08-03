@@ -399,7 +399,7 @@ def process_telegram_update(update: dict):
     session, _ = TelegramSession.objects.get_or_create(chat_id=str(chat_id))
 
     # Command: /start or /login
-    if text in ["/start", "/login"]:
+    if text.startswith("/start") or text.startswith("/login"):
         if session.state == 'AUTHENTICATED' and session.xodim and session.xodim.is_active:
             xodim = session.xodim
             b_nomi = xodim.biznes.nomi if xodim.biznes else 'Mavjud emas'
