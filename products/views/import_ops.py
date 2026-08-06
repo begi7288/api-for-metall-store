@@ -98,6 +98,12 @@ class ImportViewSet(viewsets.ModelViewSet):
         except Exception as e:
             raise DRFValidationError({'detail': str(e)})
             
+        try:
+            from user.telegram_bot import notify_import
+            notify_import(import_obj)
+        except Exception:
+            pass
+
         return Response({
             'status': "Import muvaffaqiyatli yakunlandi.",
             'holat': import_obj.holat

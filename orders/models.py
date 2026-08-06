@@ -95,15 +95,58 @@ class SupplierOrder(BaseModel):
                 })
         return differences
 
-    def qabul_qilish(self, apply_new_prices, executor_employee):
+    def qabul_qilish(self, apply_new_prices, executor_employee, delivery_cost=Decimal('0.00'), unloading_cost=Decimal('0.00'), distribution_method='teng'):
         if self.holat not in ['qoralama', 'rasmiylashtirilgan']:
             raise ValidationError("Faqat qoralama yoki rasmiylashtirilgan buyurtmalarni qabul qilish mumkin.")
             
+        total_extra = Decimal(str(delivery_cost or 0)) + Decimal(str(unloading_cost or 0))
+        
+        # Calculate total quantity
+        total_qty = sum(item.miqdori for item in self.elementlar.all())
+        
+        # Calculate total original cost
+        total_original_cost = sum(item.miqdori * item.kelish_narxi for item in self.elementlar.all())
+        
+        # Allocate extra cost to each item
         for item in self.elementlar.all():
             product = item.mahsulot
+            
+            extra_per_unit = Decimal('0.00')
+            if total_extra > 0 and item.miqdori > 0:
+                if 'mutanosib' in str(distribution_method).lower() or 'proportion' in str(distribution_method).lower():
+                    # Qiymatiga mutanosib
+                    if total_original_cost > 0:
+                        item_cost = item.miqdori * item.kelish_narxi
+                        item_share = item_cost / total_original_cost
+                        item_allocated_extra = total_extra * item_share
+                        extra_per_unit = item_allocated_extra / Decimal(item.miqdori)
+                else:
+                    # Teng taqsimlash
+                    if total_qty > 0:
+                        extra_per_unit = total_extra / Decimal(total_qty)
+                        
+            extra_per_unit = extra_per_unit.quantize(Decimal('0.01'))
+            final_kelish_narxi = item.kelish_narxi + extra_per_unit
+            
+            # Recalculate selling price if markup (ustama) is set
+            # "sotish narxi ham foiz berganimga qarab avto hisoblanib u ham yangilansin"
+            if item.ustama > 0:
+                final_sotish_narxi = (final_kelish_narxi * (1 + item.ustama / Decimal('100.00'))).quantize(Decimal('0.01'))
+            else:
+                final_sotish_narxi = item.sotish_narxi
+                if final_sotish_narxi < final_kelish_narxi:
+                    final_sotish_narxi = final_kelish_narxi
+                if final_kelish_narxi > 0:
+                    item.ustama = (((final_sotish_narxi - final_kelish_narxi) / final_kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
+            
+            # Update order item values so they are stored in the order history
+            item.kelish_narxi = final_kelish_narxi
+            item.sotish_narxi = final_sotish_narxi
+            item.save()
+            
             if apply_new_prices:
-                product.sotish_narxi = item.sotish_narxi
-                product.kelish_narxi = item.kelish_narxi
+                product.kelish_narxi = final_kelish_narxi
+                product.sotish_narxi = final_sotish_narxi
                 product.ulgurji_narx = item.ulgurji_narx
                 product.ustama = item.ustama
                 product.save()
@@ -124,6 +167,29 @@ class SupplierOrder(BaseModel):
         self.haqiqiy_qabul_sana = now()
         self.qabul_qilgan_xodim = executor_employee
         self.save()
+
+        # Create Xarajat (Expense) record if there are additional costs
+        if total_extra > 0:
+            try:
+                from sales.models import Xarajat, XarajatKategoriyasi
+                kategoriya, _ = XarajatKategoriyasi.objects.get_or_create(
+                    biznes=self.biznes,
+                    nomi="Dostavka va Tushurish",
+                    defaults={"tavsif": "Buyurtmalar uchun yetkazib berish va yuk tushirish xarajatlari"}
+                )
+                
+                Xarajat.objects.create(
+                    biznes=self.biznes,
+                    kategoriya=kategoriya,
+                    taminotchi=self.taminotchi,
+                    miqdor=total_extra,
+                    tolov_turi='naqd',
+                    sana=now().date(),
+                    izoh=f"Buyurtma #{self.id} uchun qo'shimcha xarajatlar (Dostavka: {delivery_cost:,.0f}, Tushurish: {unloading_cost:,.0f})",
+                    xodim=executor_employee
+                )
+            except Exception as e:
+                print(f"Error creating extra cost expense: {e}")
 
         # If supplier has advance deposit (balans > 0) and order has debt (nasiya_summa > 0), auto-apply balance
         if self.taminotchi and self.taminotchi.balans > 0 and self.nasiya_summa > 0:
@@ -146,6 +212,20 @@ class SupplierOrder(BaseModel):
         self.holat = 'bekor_qilingan'
         self.save()
 
+    def delete(self, *args, **kwargs):
+        if self.holat == 'qabul_qilingan':
+            for item in self.elementlar.all():
+                product = item.mahsulot
+                try:
+                    qoldiq = DokonQoldiq.objects.get(mahsulot=product, dokon=self.dokon)
+                    qoldiq.miqdori = max(0, qoldiq.miqdori - item.miqdori)
+                    qoldiq.save()
+                    product.miqdori = sum(q.miqdori for q in product.qoldiqlar.all())
+                    product.save(update_fields=['miqdori'])
+                except Exception:
+                    pass
+        super().delete(*args, **kwargs)
+
 class SupplierOrderItem(BaseModel):
     order = models.ForeignKey(SupplierOrder, on_delete=models.CASCADE, related_name='elementlar')
     mahsulot = models.ForeignKey(Mahsulot, on_delete=models.PROTECT, related_name='xarid_elementlari')
@@ -164,15 +244,19 @@ class SupplierOrderItem(BaseModel):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
-        self.order.umumiy_summa = self.order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
-        self.order.sotuv_summasi = self.order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('sotish_narxi')))['total'] or Decimal('0.00')
+        total_kelish = self.order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
+        total_sotuv = self.order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('sotish_narxi')))['total'] or Decimal('0.00')
+        self.order.umumiy_summa = Decimal(str(total_kelish)).quantize(Decimal('0.01'))
+        self.order.sotuv_summasi = Decimal(str(total_sotuv)).quantize(Decimal('0.01'))
         self.order.save()
 
     def delete(self, *args, **kwargs):
         order = self.order
         super().delete(*args, **kwargs)
-        order.umumiy_summa = order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
-        order.sotuv_summasi = order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('sotish_narxi')))['total'] or Decimal('0.00')
+        total_kelish = order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('kelish_narxi')))['total'] or Decimal('0.00')
+        total_sotuv = order.elementlar.aggregate(total=models.Sum(models.F('miqdori') * models.F('sotish_narxi')))['total'] or Decimal('0.00')
+        order.umumiy_summa = Decimal(str(total_kelish)).quantize(Decimal('0.01'))
+        order.sotuv_summasi = Decimal(str(total_sotuv)).quantize(Decimal('0.01'))
         order.save()
 
 class SupplierOrderPayment(BaseModel):
@@ -191,7 +275,7 @@ class SupplierOrderPayment(BaseModel):
     order = models.ForeignKey(SupplierOrder, on_delete=models.CASCADE, related_name='to_lovlar')
     tolangan_summa = models.DecimalField(max_digits=15, decimal_places=2)
     tolov_turi = models.CharField(max_length=30, choices=TURI_CHOICES)
-    xodim = models.ForeignKey(Xodim, on_delete=models.PROTECT, related_name='supplier_tolovlari')
+    xodim = models.ForeignKey(Xodim, on_delete=models.SET_NULL, null=True, blank=True, related_name='supplier_tolovlari')
 
     def __str__(self):
         return f"{self.tolangan_summa} - {self.tolov_turi}"

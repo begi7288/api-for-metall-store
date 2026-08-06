@@ -55,6 +55,21 @@ class Sale(BaseModel):
         if self.chegirma_qiymati < 0:
             raise ValidationError({'chegirma_qiymati': "Chegirma qiymati manfiy bo'lishi mumkin emas."})
 
+        # Nasiya / aralash nasiya uchun mijoz shart
+        has_nasiya = False
+        if self.tolov_usuli == 'nasiya':
+            has_nasiya = True
+        elif self.tolov_usuli == 'aralash' and self.eslatma:
+            import re
+            cleaned_eslatma = re.sub(r'\s+', '', self.eslatma)
+            nasiya_match = re.search(r'(?:Nasiya|Qarz|Credit)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            p_nasiya = Decimal(nasiya_match.group(1)) if nasiya_match else Decimal('0.00')
+            if p_nasiya > 0:
+                has_nasiya = True
+
+        if has_nasiya and not self.mijoz:
+            raise ValidationError({'mijoz': "Nasiya (qarz)ga sotish uchun mijoz tanlanishi shart."})
+
     def save(self, *args, **kwargs):
         self.clean()
         
@@ -65,8 +80,25 @@ class Sale(BaseModel):
             self.chegirma_summasi = self.chegirma_qiymati
             
         self.yakuniy_summa = max(Decimal('0.00'), self.oraliq_jami - self.chegirma_summasi)
-        if self.tolov_usuli == 'nasiya' and self.tolangan_summa == Decimal('0.00'):
+        if self.tolov_usuli == 'nasiya':
+            self.tolangan_summa = Decimal('0.00')
             self.nasiya_summa = self.yakuniy_summa
+        elif self.tolov_usuli == 'aralash' and self.eslatma:
+            import re
+            cleaned_eslatma = re.sub(r'\s+', '', self.eslatma)
+            naqd_match = re.search(r'(?:Naqd|Cash)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            karta_match = re.search(r'(?:Plastikkarta|Plastik|Karta|Card|Uzcard|Humo)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            nasiya_match = re.search(r'(?:Nasiya|Qarz|Credit)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            
+            p_naqd = Decimal(naqd_match.group(1)) if naqd_match else Decimal('0.00')
+            p_karta = Decimal(karta_match.group(1)) if karta_match else Decimal('0.00')
+            p_nasiya = Decimal(nasiya_match.group(1)) if nasiya_match else Decimal('0.00')
+            
+            if p_naqd > 0 or p_karta > 0 or p_nasiya > 0:
+                self.tolangan_summa = p_naqd + p_karta
+                self.nasiya_summa = p_nasiya
+            else:
+                self.nasiya_summa = max(Decimal('0.00'), self.yakuniy_summa - self.tolangan_summa)
         else:
             self.nasiya_summa = max(Decimal('0.00'), self.yakuniy_summa - self.tolangan_summa)
         

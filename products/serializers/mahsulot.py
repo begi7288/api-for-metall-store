@@ -130,30 +130,87 @@ class MahsulotShtrixKodSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class MultiImageField(serializers.FileField):
+class MultiImageField(serializers.Field):
     def to_internal_value(self, data):
-        if not data:
+        if data is None or data == '' or data == 'null' or data == 'undefined' or data == [] or data == 'None':
             return []
-        
+
+        if isinstance(data, str):
+            data_clean = data.strip()
+            if not data_clean or data_clean.lower() in ('null', 'undefined', 'none', ''):
+                return []
+            if data_clean.startswith('[') and data_clean.endswith(']'):
+                import json
+                try:
+                    data = json.loads(data_clean)
+                except Exception:
+                    data = [data_clean]
+            else:
+                data = [data_clean]
+
         if not isinstance(data, list):
             data = [data]
-            
+
+        data = [item for item in data if item is not None and str(item).strip().lower() not in ('null', 'undefined', '', 'none')]
+
+        if not data:
+            return []
+
         if len(data) > 5:
             raise serializers.ValidationError("Ko'pi bilan 5 tagacha rasm yuklash mumkin.")
-            
+
+        import base64
+        import uuid
+        from django.core.files.base import ContentFile
         from products.models import validate_image_size
-        
+
         validated_files = []
         image_field = serializers.ImageField(allow_empty_file=False)
+
         for img in data:
+            if not img or str(img).strip().lower() in ('null', 'undefined', '', 'none'):
+                continue
+
+            if isinstance(img, str):
+                img_str = img.strip()
+                if not img_str or img_str.lower() in ('null', 'undefined', 'none'):
+                    continue
+
+                # Base64 string
+                if img_str.startswith('data:image/') or ';base64,' in img_str or (len(img_str) > 100 and not img_str.startswith(('http://', 'https://', '/'))):
+                    try:
+                        if ';base64,' in img_str:
+                            header, data_str = img_str.split(';base64,')
+                            ext = header.split('/')[-1].split(';')[0] if '/' in header else 'jpg'
+                            if ext == 'jpeg':
+                                ext = 'jpg'
+                        else:
+                            data_str = img_str
+                            ext = 'jpg'
+                        decoded_file = base64.b64decode(data_str)
+                        file_name = f"{uuid.uuid4().hex[:10]}.{ext}"
+                        validated_files.append(ContentFile(decoded_file, name=file_name))
+                        continue
+                    except Exception:
+                        pass
+
+                # Image URL
+                if img_str.startswith(('http://', 'https://', '/media/', 'media/', '/')):
+                    file_name = f"{uuid.uuid4().hex[:10]}.jpg"
+                    validated_files.append(ContentFile(b"", name=file_name))
+                    continue
+
             try:
                 validated_img = image_field.run_validation(img)
                 validate_image_size(validated_img)
                 validated_files.append(validated_img)
-            except serializers.ValidationError as e:
-                raise serializers.ValidationError(e.detail)
-            except ValidationError as e:
-                raise serializers.ValidationError(e.messages)
+            except (serializers.ValidationError, ValidationError) as e:
+                if hasattr(img, 'read'):
+                    validated_files.append(img)
+                else:
+                    msg = getattr(e, 'detail', None) or getattr(e, 'messages', None) or str(e)
+                    raise serializers.ValidationError(msg)
+
         return validated_files
 
 
@@ -202,8 +259,8 @@ class DokonQoldiqWriteSerializer(serializers.ModelSerializer):
 class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     kam_qoldi = serializers.ReadOnlyField()
     sotish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
-    ustama = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0.00)
-    rasm = MultiImageField(required=False, write_only=True, style={'multiple': True})
+    ustama = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0.00)
+    rasm = MultiImageField(required=False, allow_null=True, write_only=True, style={'multiple': True})
     shtrix_kod = MultiBarcodeField(required=False, style={'multiple': True})
     qoldiqlar = DokonQoldiqWriteSerializer(many=True, required=False)
     olchov_birligi = OlchovBirligiRelatedField(queryset=OlchovBirligi.objects.all(), required=False, allow_null=True)
@@ -271,8 +328,8 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         if hasattr(data, 'getlist'):
             mutable_data = {}
             for key in data.keys():
-                if key == 'rasm':
-                    mutable_data[key] = data.getlist(key)
+                if key in ('rasm', 'image', 'rasmlar', 'images', 'photo', 'photos'):
+                    mutable_data['rasm'] = data.getlist(key)
                 elif key == 'shtrix_kod':
                     mutable_data[key] = data.getlist(key)
                 elif key == 'characteristics':
@@ -280,6 +337,32 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                 else:
                     mutable_data[key] = data.get(key)
             data = mutable_data
+        elif isinstance(data, dict):
+            if hasattr(data, 'copy'):
+                data = data.copy()
+            else:
+                data = dict(data)
+
+        if isinstance(data, dict):
+            for k, v in list(data.items()):
+                if isinstance(v, str) and k in (
+                    'kelish_narxi', 'sotish_narxi', 'ulgurji_narx', 'ustama',
+                    'oxirgi_narx', 'oxirgiNarx', 'kelishNarxi', 'sotishNarxi',
+                    'selling_price', 'cost_price'
+                ):
+                    data[k] = v.replace(' ', '').replace('\xa0', '').replace(',', '.')
+
+            rasm_val = data.get('rasm') or data.get('image') or data.get('rasmlar') or data.get('images') or data.get('photo') or data.get('photos')
+            if rasm_val is not None:
+                data['rasm'] = rasm_val
+
+            kelish_val = data.get('kelish_narxi') or data.get('oxirgi_narx') or data.get('oxirgiNarx') or data.get('kelishNarxi') or data.get('cost_price')
+            if kelish_val is not None:
+                data['kelish_narxi'] = kelish_val
+
+            sotish_val = data.get('sotish_narxi') or data.get('sotishNarxi') or data.get('selling_price')
+            if sotish_val is not None:
+                data['sotish_narxi'] = sotish_val
 
         kat_val = data.get('kategoriya') or data.get('category') or data.get('kategoriya_nomi') or data.get('toifa_nomi') or data.get('category_name')
         if kat_val and not data.get('toifa'):
@@ -409,6 +492,10 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             ret['brend'] = "Mavjud emas"
             ret['brend_id'] = None
             ret['brend_nomi'] = "Mavjud emas"
+        ret['oxirgi_narx'] = str(instance.kelish_narxi) if instance.kelish_narxi else '0.00'
+        ret['oxirgiNarx'] = str(instance.kelish_narxi) if instance.kelish_narxi else '0.00'
+        ret['kelishNarxi'] = str(instance.kelish_narxi) if instance.kelish_narxi else '0.00'
+        ret['sotishNarxi'] = str(instance.sotish_narxi) if instance.sotish_narxi else '0.00'
         return ret
 
     def get_dokon(self, obj):
@@ -477,17 +564,44 @@ class MahsulotSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
+        from decimal import Decimal
+        for key in ['kelish_narxi', 'sotish_narxi', 'ulgurji_narx']:
+            val = representation.get(key)
+            if val is not None:
+                try:
+                    s = str(val)
+                    if '.' in s:
+                        s = s.rstrip('0').rstrip('.')
+                    representation[key] = s
+                except Exception:
+                    pass
+
+        representation['oxirgi_narx'] = representation.get('kelish_narxi') or '0'
+        representation['oxirgiNarx'] = representation.get('kelish_narxi') or '0'
+        representation['kelishNarxi'] = representation.get('kelish_narxi') or '0'
+        representation['sotishNarxi'] = representation.get('sotish_narxi') or '0'
+
+
+
         representation['olchov_birligi'] = instance.olchov_birligi.short_name if instance.olchov_birligi else ""
         representation['kategoriya'] = instance.toifa or "Mavjud emas"
         representation['category'] = instance.toifa or "Mavjud emas"
         representation['kategoriya_nomi'] = instance.toifa or "Mavjud emas"
         representation['category_name'] = instance.toifa or "Mavjud emas"
         representation['toifa_nomi'] = instance.toifa or "Mavjud emas"
-        representation['rasm'] = MahsulotRasmSerializer(
+        images_data = MahsulotRasmSerializer(
             instance.rasmlar.all(),
             many=True,
             context=self.context
         ).data
+
+        request = self.context.get('request')
+        is_active_query = request.query_params.get('is_active') if request else None
+
+        if is_active_query and is_active_query.lower() == 'false':
+            representation['rasm'] = images_data[0]['rasm'] if images_data else None
+        else:
+            representation['rasm'] = images_data
         representation['shtrix_kod'] = [b.kod for b in instance.shtrix_kodlar.all()]
         representation['characteristics'] = CharacteristicSerializer(
             instance.characteristics.all(),

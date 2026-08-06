@@ -53,7 +53,7 @@ class Mahsulot(BaseModel):
     nomi = models.CharField(max_length=255)
     olchov_birligi = models.ForeignKey('OlchovBirligi', on_delete=models.SET_NULL, related_name='mahsulotlar', null=True, blank=True)
     kelish_narxi = models.DecimalField(max_digits=12, decimal_places=2)
-    ustama = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, validators=[MinValueValidator(0.00), MaxValueValidator(100.00)])
+    ustama = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, validators=[MinValueValidator(0.00)])
     sotish_narxi = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
     miqdori = models.PositiveIntegerField(default=0)
     ogohlantirish = models.PositiveIntegerField(default=0)
@@ -135,14 +135,25 @@ class Mahsulot(BaseModel):
                 if self.sotish_narxi < self.kelish_narxi:
                     raise ValidationError({'sotish_narxi': "Sotish narxi kelish narxidan kichik bo'lishi mumkin emas."})
                 self.ustama = (((self.sotish_narxi - self.kelish_narxi) / self.kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
-                if self.ustama < 0 or self.ustama > 100:
-                    raise ValidationError({'sotish_narxi': "Sotish narxi ustamasi 0% va 100% oralig'ida bo'lishi kerak."})
+
             else:
                 if self.ustama is None:
                     self.ustama = Decimal('0.00')
-                self.sotish_narxi = (self.kelish_narxi * (Decimal('1.00') + self.ustama / Decimal('100.00'))).quantize(Decimal('0.01'))
+                ustama_dec = Decimal(str(self.ustama))
+                self.sotish_narxi = (self.kelish_narxi * (Decimal('1.00') + ustama_dec / Decimal('100.00'))).quantize(Decimal('1'))
 
     def save(self, *args, **kwargs):
+        if self.toifa and str(self.toifa).strip() and str(self.toifa).strip() != "Mavjud emas":
+            from products.models import MahsulotToifasi
+            toifa_clean = str(self.toifa).strip()
+            qs = MahsulotToifasi.objects.filter(biznes=self.biznes) if self.biznes else MahsulotToifasi.objects.all()
+            cat_obj = qs.filter(nomi__iexact=toifa_clean).first()
+            if not cat_obj:
+                MahsulotToifasi.objects.get_or_create(
+                    biznes=self.biznes,
+                    nomi=toifa_clean
+                )
+
         if hasattr(self, '_temp_olchov_birligi'):
             val = getattr(self, '_temp_olchov_birligi')
             from products.models import OlchovBirligi
@@ -176,7 +187,92 @@ class Mahsulot(BaseModel):
             delattr(self, '_temp_brend')
 
         is_new = not self.pk
+        is_active_changed = False
+        cost_changed = False
+        old_nomi = self.nomi
+        
+        if not is_new:
+            old_instance = Mahsulot.objects.filter(pk=self.pk).first()
+            if old_instance:
+                old_nomi = old_instance.nomi
+                if old_instance.is_active != self.is_active:
+                    is_active_changed = True
+                if old_instance.kelish_narxi != self.kelish_narxi or old_instance.miqdori != self.miqdori or old_instance.nomi != self.nomi:
+                    cost_changed = True
+
         super().save(*args, **kwargs)
+
+        if not is_new and cost_changed and not kwargs.get('raw', False) and self.biznes:
+            try:
+                from sales.models import Xarajat, XarajatKategoriyasi
+                new_cost = Decimal(str(self.miqdori or 0)) * Decimal(str(self.kelish_narxi or 0))
+                kat = XarajatKategoriyasi.objects.filter(nomi="Mahsulot kirimi", biznes=self.biznes).first()
+                if kat:
+                    # Update creation expense
+                    creation_search = f"Yangi mahsulot kirimi: {old_nomi}"
+                    creation_expense = Xarajat.objects.filter(
+                        biznes=self.biznes,
+                        kategoriya=kat,
+                        izoh__startswith=creation_search
+                    ).first()
+                    if creation_expense:
+                        unit_name = self.olchov_birligi.short_name if self.olchov_birligi else "dona"
+                        creation_expense.miqdor = new_cost
+                        creation_expense.izoh = f"Yangi mahsulot kirimi: {self.nomi} ({self.miqdori} {unit_name})"
+                        creation_expense.save(update_fields=['miqdor', 'izoh'])
+
+                    # Update archive expense if exists
+                    archive_search = f"Yangi mahsulot kirimi: Arxivlandi - {old_nomi}"
+                    archive_expense = Xarajat.objects.filter(
+                        biznes=self.biznes,
+                        kategoriya=kat,
+                        izoh__startswith=archive_search
+                    ).first()
+                    if archive_expense:
+                        archive_expense.miqdor = -new_cost
+                        archive_expense.izoh = f"Yangi mahsulot kirimi: Arxivlandi - {self.nomi} ({self.miqdori} ta)"
+                        archive_expense.save(update_fields=['miqdor', 'izoh'])
+
+                    # Update restored/tiklandi expense if exists
+                    tiklandi_search = f"Yangi mahsulot kirimi: Tiklandi - {old_nomi}"
+                    tiklandi_expense = Xarajat.objects.filter(
+                        biznes=self.biznes,
+                        kategoriya=kat,
+                        izoh__startswith=tiklandi_search
+                    ).first()
+                    if tiklandi_expense:
+                        tiklandi_expense.miqdor = new_cost
+                        tiklandi_expense.izoh = f"Yangi mahsulot kirimi: Tiklandi - {self.nomi} ({self.miqdori} ta)"
+                        tiklandi_expense.save(update_fields=['miqdor', 'izoh'])
+            except Exception:
+                pass
+
+        if is_active_changed and not kwargs.get('raw', False):
+            amount = Decimal(str(self.miqdori or 0)) * Decimal(str(self.kelish_narxi or 0))
+            if amount > 0 and self.biznes:
+                try:
+                    from sales.models import Xarajat, XarajatKategoriyasi
+                    from django.utils import timezone
+                    kat, _ = XarajatKategoriyasi.objects.get_or_create(nomi="Mahsulot kirimi", biznes=self.biznes)
+                    
+                    if not self.is_active:  # Archived
+                        change_amount = -amount
+                        izoh_str = f"Yangi mahsulot kirimi: Arxivlandi - {self.nomi} ({self.miqdori} ta)"
+                    else:  # Restored
+                        change_amount = amount
+                        izoh_str = f"Yangi mahsulot kirimi: Tiklandi - {self.nomi} ({self.miqdori} ta)"
+                        
+                    Xarajat.objects.create(
+                        biznes=self.biznes,
+                        kategoriya=kat,
+                        taminotchi=self.taminotchi,
+                        miqdor=change_amount,
+                        sana=timezone.now().date(),
+                        izoh=izoh_str
+                    )
+                except Exception:
+                    pass
+
         if is_new and not kwargs.get('raw', False):
             custom_barcodes = getattr(self, '_custom_barcodes', None)
             if custom_barcodes:
@@ -365,19 +461,19 @@ class Import(BaseModel):
                     col_mapping['nomi'] = idx
                 elif any(k in h for k in ['shtrix', 'barcode', 'barkod', 'баркод', 'kod', 'код']):
                     col_mapping['shtrix_kod'] = idx
-                elif any(k in h for k in ['miqdor', 'qty', 'kol', 'кол']):
+                elif any(k in h for k in ['miqdor', 'qty', 'kol', 'кол', 'soni', 'son', 'количество']):
                     col_mapping['miqdori'] = idx
-                elif any(k in h for k in ['kelish', 'cost', 'поставки']):
+                elif any(k in h for k in ['kelish', 'cost', 'поставки', 'kirim']):
                     col_mapping['kelish_narxi'] = idx
                 elif any(k in h for k in ['sotish', 'retail', 'продажи', 'sotuv', 'розничная']):
                     col_mapping['sotish_narxi'] = idx
                 elif any(k in h for k in ['birlik', 'unit', 'единица', 'o\'lchov']):
                     col_mapping['olchov_birligi'] = idx
-                elif any(k in h for k in ['toifa', 'category', 'категория']):
+                elif any(k in h for k in ['toifa', 'category', 'категория', 'kategoriya']):
                     col_mapping['toifa'] = idx
                 elif any(k in h for k in ['brend', 'brand', 'бренд']):
                     col_mapping['brend'] = idx
-                elif any(k in h for k in ['taminotchi', 'supplier', 'поставщик', 'yetkazib']):
+                elif any(k in h for k in ['taminotchi', 'supplier', 'поставщик', 'yetkazib', 'postavshik']):
                     col_mapping['taminotchi'] = idx
                 elif any(k in h for k in ['tavsif', 'description', 'описание']):
                     col_mapping['tavsif'] = idx
@@ -547,6 +643,12 @@ class Import(BaseModel):
             })
 
         if row_errors:
+            self.holat = 'xatolik'
+            self.kelish_summasi = Decimal('0.00')
+            self.sotish_summasi = Decimal('0.00')
+            self.miqdori = 0
+            if self.pk:
+                super().save(update_fields=['holat', 'kelish_summasi', 'sotish_summasi', 'miqdori'])
             raise ValidationError({'fayl': row_errors})
 
         self.miqdori = total_qty
@@ -559,6 +661,15 @@ class Import(BaseModel):
     def confirm_and_execute(self, executor_xodim=None):
         if self.holat != 'kutilmoqda':
             raise ValidationError("Ushbu import allaqachon yakunlangan yoki bekor qilingan.")
+
+        if not self.taminotchi:
+            tam_obj, _ = Taminotchi.objects.get_or_create(
+                biznes=self.biznes,
+                nomi="Import yetkazib beruvchisi"
+            )
+            self.taminotchi = tam_obj
+            if self.pk:
+                self.save(update_fields=['taminotchi'])
 
         for item in self.elementlar:
             shtrix_kod = item.get('shtrix_kod')
@@ -578,6 +689,15 @@ class Import(BaseModel):
                 taminotchi_obj, created = Taminotchi.objects.get_or_create(
                     biznes=self.biznes,
                     nomi=taminotchi_nomi
+                )
+
+            if not taminotchi_obj and self.taminotchi:
+                taminotchi_obj = self.taminotchi
+
+            if not taminotchi_obj:
+                taminotchi_obj, created = Taminotchi.objects.get_or_create(
+                    biznes=self.biznes,
+                    nomi="Import yetkazib beruvchisi"
                 )
 
             product = None
@@ -604,31 +724,41 @@ class Import(BaseModel):
                     characteristics_objs.append(char_obj)
 
             if product:
-                if self.dokon:
-                    qoldiq, created = DokonQoldiq.objects.get_or_create(mahsulot=product, dokon=self.dokon)
-                    if self.import_turi == 'kirim':
-                        qoldiq.miqdori += miqdori
-                    elif self.import_turi == 'qaytarish':
-                        qoldiq.miqdori = max(0, qoldiq.miqdori - miqdori)
+                if True:
+                    if self.dokon:
+                        qoldiq, created = DokonQoldiq.objects.get_or_create(mahsulot=product, dokon=self.dokon)
+                        if self.import_turi == 'kirim':
+                            qoldiq.miqdori += miqdori
+                        elif self.import_turi == 'qaytarish':
+                            qoldiq.miqdori = max(0, qoldiq.miqdori - miqdori)
+                        else:
+                            qoldiq.miqdori = miqdori
+                        qoldiq.save()
+                        product.miqdori = sum(q.miqdori for q in product.qoldiqlar.all())
                     else:
-                        qoldiq.miqdori = miqdori
-                    qoldiq.save()
-                    product.miqdori = sum(q.miqdori for q in product.qoldiqlar.all())
-                else:
-                    if self.import_turi == 'kirim':
-                        product.miqdori += miqdori
-                    elif self.import_turi == 'qaytarish':
-                        product.miqdori = max(0, product.miqdori - miqdori)
-                    else:
-                        product.miqdori = miqdori
+                        if self.import_turi == 'kirim':
+                            product.miqdori += miqdori
+                        elif self.import_turi == 'qaytarish':
+                            product.miqdori = max(0, product.miqdori - miqdori)
+                        else:
+                            product.miqdori = miqdori
 
-                if kelish_narxi > 0:
-                    product.kelish_narxi = kelish_narxi
-                if sotish_narxi > 0:
-                    product.sotish_narxi = sotish_narxi
+                    if kelish_narxi > 0:
+                        if product.miqdori > miqdori and product.kelish_narxi > 0:
+                            old_qty = product.miqdori - miqdori
+                            if old_qty > 0:
+                                total_val = (Decimal(str(old_qty)) * product.kelish_narxi) + (Decimal(str(miqdori)) * kelish_narxi)
+                                product.kelish_narxi = (total_val / Decimal(str(product.miqdori))).quantize(Decimal('0.01'))
+                            else:
+                                product.kelish_narxi = kelish_narxi
+                        else:
+                            product.kelish_narxi = kelish_narxi
 
-                if kelish_narxi > 0 and sotish_narxi > 0:
-                    product.ustama = (((sotish_narxi - kelish_narxi) / kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
+                    if sotish_narxi > 0:
+                        product.sotish_narxi = sotish_narxi
+
+                    if product.kelish_narxi > 0 and product.sotish_narxi > 0:
+                        product.ustama = (((product.sotish_narxi - product.kelish_narxi) / product.kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
 
                 if toifa:
                     product.toifa = toifa
@@ -694,6 +824,24 @@ class Import(BaseModel):
         if executor_xodim:
             self.yakunlagan_xodim = executor_xodim
         self.save()
+
+        if self.kelish_summasi > 0:
+            try:
+                from sales.models import Xarajat, XarajatKategoriyasi
+                from django.utils import timezone
+                kat, _ = XarajatKategoriyasi.objects.get_or_create(biznes=self.biznes, nomi="Mahsulot kirimi")
+                Xarajat.objects.create(
+                    biznes=self.biznes,
+                    kategoriya=kat,
+                    taminotchi=self.taminotchi,
+                    miqdor=self.kelish_summasi,
+                    tolov_turi=self.tolov_turi if self.tolov_turi in ['naqd', 'karta', 'nasiya', 'aralash'] else 'naqd',
+                    sana=self.yaratilgan_vaqt.date() if self.yaratilgan_vaqt else timezone.now().date(),
+                    izoh=f"Import orqali tovarlar kirimi: {self.nomi}",
+                    xodim=self.yaratgan_xodim or executor_xodim
+                )
+            except Exception:
+                pass
 
     def __str__(self):
         return f"Import: {self.nomi} ({self.get_holat_display()})"

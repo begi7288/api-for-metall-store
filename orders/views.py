@@ -134,12 +134,7 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance.holat not in ['qoralama', 'bekor_qilingan']:
-            return Response(
-                {"detail": "Faqat qoralama yoki bekor qilingan buyurtmalarni o'chirish mumkin."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Allowed to delete any order safely (stock gets reverted if qabul_qilingan)
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
@@ -201,9 +196,26 @@ class SupplierOrderViewSet(viewsets.ModelViewSet):
         if not isinstance(apply_new_prices, bool):
             apply_new_prices = str(apply_new_prices).lower() == 'true'
 
+        delivery_cost = request.data.get('dostavka_narxi') or request.data.get('delivery_cost') or request.data.get('dostavka') or 0
+        unloading_cost = request.data.get('tushurish_narxi') or request.data.get('unloading_cost') or request.data.get('tushurish') or 0
+        distribution_method = request.data.get('taqsimlash_usuli') or request.data.get('distribution_method') or 'teng'
+
+        try:
+            delivery_cost = Decimal(str(delivery_cost))
+            unloading_cost = Decimal(str(unloading_cost))
+        except Exception:
+            delivery_cost = Decimal('0.00')
+            unloading_cost = Decimal('0.00')
+
         xodim = request.user.xodim if hasattr(request.user, 'xodim') else None
         try:
-            order_obj.qabul_qilish(apply_new_prices, xodim)
+            order_obj.qabul_qilish(
+                apply_new_prices=apply_new_prices,
+                executor_employee=xodim,
+                delivery_cost=delivery_cost,
+                unloading_cost=unloading_cost,
+                distribution_method=distribution_method
+            )
         except DjangoValidationError as e:
             raise serializers.ValidationError({'detail': str(e)})
 

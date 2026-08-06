@@ -42,6 +42,42 @@ def _telegram_polling_loop():
             time.sleep(5)
 
 
+def _telegram_scheduler_loop():
+    logger.info("🤖 [TELEGRAM BOT] Background weekly debt reminder scheduler started.")
+    import os
+    import datetime
+    import time
+    from django.utils import timezone
+
+    last_run_date = None
+    if os.path.exists("last_debt_reminder_date.txt"):
+        try:
+            with open("last_debt_reminder_date.txt", "r") as f:
+                last_run_date = datetime.date.fromisoformat(f.read().strip())
+        except Exception:
+            pass
+
+    while True:
+        try:
+            tz_offset = datetime.timedelta(hours=5)
+            local_now = timezone.now() + tz_offset
+            
+            if local_now.weekday() == 0 and local_now.hour == 11 and last_run_date != local_now.date():
+                from user.telegram_bot import send_weekly_debt_reminders
+                send_weekly_debt_reminders()
+                
+                last_run_date = local_now.date()
+                try:
+                    with open("last_debt_reminder_date.txt", "w") as f:
+                        f.write(last_run_date.isoformat())
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"[TELEGRAM BOT] Scheduler exception: {e}")
+        
+        time.sleep(60)
+
+
 _bot_thread_started = False
 
 
@@ -53,3 +89,6 @@ def start_telegram_bot_background():
 
     t = threading.Thread(target=_telegram_polling_loop, daemon=True)
     t.start()
+
+    ts = threading.Thread(target=_telegram_scheduler_loop, daemon=True)
+    ts.start()

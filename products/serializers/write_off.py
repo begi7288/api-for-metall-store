@@ -62,6 +62,16 @@ class WriteOffSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             if data.get('sababi'):
                 data['sababi'] = str(data['sababi']).lower().strip()
 
+            fayldan = data.get('fayldan_hisobdan_chiqarish') if 'fayldan_hisobdan_chiqarish' in data else (data.get('is_from_file') or data.get('from_file'))
+            if fayldan is not None:
+                if isinstance(fayldan, str):
+                    val_clean = fayldan.strip().lower()
+                    data['fayldan_hisobdan_chiqarish'] = val_clean in ('true', '1', 'ha', 'yes', 't', 'y')
+                elif isinstance(fayldan, bool):
+                    data['fayldan_hisobdan_chiqarish'] = fayldan
+
+
+
             if not data.get('nomi'):
                 from django.utils.timezone import now
                 data['nomi'] = f"Hisobdan chiqarish {now().strftime('%Y.%m.%d %H:%M')}"
@@ -198,12 +208,16 @@ class WriteOffSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         content = file_obj.read()
 
         rows = []
-        if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-            wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
-            sheet = wb.active
-            for row in sheet.iter_rows(values_only=True):
-                if any(x is not None for x in row):
-                    rows.append([str(x) if x is not None else "" for x in row])
+        file_name_lower = file_name.lower()
+        if file_name_lower.endswith('.xlsx') or file_name_lower.endswith('.xls') or file_name_lower.endswith('.xlsm'):
+            try:
+                wb = openpyxl.load_workbook(filename=BytesIO(content), data_only=True)
+                sheet = wb.active if wb.active is not None else wb.worksheets[0]
+                for row in sheet.iter_rows(values_only=True):
+                    if any(x is not None for x in row):
+                        rows.append([str(x) if x is not None else "" for x in row])
+            except Exception as e:
+                raise serializers.ValidationError({"fayl": f"Excel faylini o'qib bo'lmadi: {str(e)}. (.xls format qo'llab-quvvatlanmaydi, iltimos .xlsx formatda yuklang)"})
         else:
             try:
                 decoded = content.decode('utf-8')

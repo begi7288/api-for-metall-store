@@ -84,29 +84,102 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
         instance.save(update_fields=['is_active'])
         return Response({"detail": "Ta'minotchi muvaffaqiyatli tiklandi."}, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post', 'patch', 'put'])
     def pay(self, request, pk=None):
         taminotchi = self.get_object()
-        amount = request.data.get('amount')
-        tolov_turi = request.data.get('tolov_turi')
+        # Determine raw amount and payment type
+        raw_amount = None
+        inferred_tolov_turi = None
 
-        if not amount or not tolov_turi:
-            return Response({"detail": "amount va tolov_turi kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+        # 1. First, check if there is an explicit amount field
+        explicit_amount_keys = (
+            'amount', 'summa', 'tolov_summasi', 'tolovSummasi', 'tolov', 'pay', 'miqdor', 'value',
+            'tolangan_summa', 'tolanganSumma'
+        )
+        for key in explicit_amount_keys:
+            val = request.data.get(key)
+            if val is not None and str(val).strip() != '':
+                raw_amount = val
+                break
 
+        # 2. If no explicit amount field, check key-per-type fields
+        if raw_amount is None:
+            type_keys = {
+                'naqd': ('naqd', 'cash', 'naqd_summa', 'naqdSumma', 'nalichnye', 'nalichnie', 'nalichnye_summa', 'nalichnie_summa'),
+                'karta': ('karta', 'card', 'plastik', 'karta_summa', 'kartaSumma', 'plastic', 'plastic_summa', 'plasticSumma'),
+                'uzcard': ('uzcard', 'uzcard_summa', 'uzcardSumma'),
+                'humo': ('humo', 'humo_summa', 'humoSumma'),
+                'balans_postavshika': ('balans', 'balans_postavshika', 'balans_summa', 'balansSumma', 'balance', 'balance_summa', 'balanceSumma')
+            }
+            # Search for first non-zero/non-empty value
+            import re
+            for t_turi, keys in type_keys.items():
+                for key in keys:
+                    val = request.data.get(key)
+                    if val is not None and str(val).strip() != '':
+                        clean_str = str(val).replace(' ', '').replace(',', '').strip()
+                        clean_str = re.sub(r'[^\d\.]', '', clean_str)
+                        if clean_str:
+                            try:
+                                dec_val = Decimal(clean_str)
+                                if dec_val > 0:
+                                    raw_amount = val
+                                    inferred_tolov_turi = t_turi
+                                    break
+                                elif raw_amount is None:
+                                    raw_amount = val
+                                    inferred_tolov_turi = t_turi
+                            except Exception:
+                                pass
+                if raw_amount is not None:
+                    break
+
+        raw_tolov_turi = (
+            request.data.get('tolov_turi') or
+            request.data.get('tolovTuri') or
+            request.data.get('payment_type') or
+            request.data.get('paymentType') or
+            request.data.get('tolov_usuli') or
+            request.data.get('method') or
+            request.data.get('type') or
+            inferred_tolov_turi or
+            'naqd'
+        )
+
+        if raw_amount is None:
+            return Response({"detail": "To'lov summasi kiritilishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+
+        import re
+        clean_amount_str = str(raw_amount).replace(' ', '').replace(',', '').strip()
+        clean_amount_str = re.sub(r'[^\d\.]', '', clean_amount_str)
         try:
-            amount_decimal = Decimal(str(amount))
+            amount_decimal = Decimal(clean_amount_str)
         except Exception:
-            return Response({"detail": "amount noto'g'ri formatda."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "To'lov summasi noto'g'ri formatda."}, status=status.HTTP_400_BAD_REQUEST)
 
         if amount_decimal <= 0:
             return Response({"detail": "To'lov summasi noldan katta bo'lishi shart."}, status=status.HTTP_400_BAD_REQUEST)
 
-        employee = request.user.xodim if hasattr(request.user, 'xodim') else None
+        tolov_turi = str(raw_tolov_turi).strip().lower()
+        if tolov_turi in ('card', 'karta'):
+            tolov_turi = 'karta'
+        elif tolov_turi in ('balans', 'balans_postavshika', 'yetkazib beruvchi balansi'):
+            tolov_turi = 'balans_postavshika'
+        elif tolov_turi in ('uzcard', 'humo', 'visa', 'mastercard', 'unionpay', 'ingenico'):
+            pass
+        elif tolov_turi in ('nasiya', 'qarz'):
+            tolov_turi = 'nasiya'
+        else:
+            tolov_turi = 'naqd'
 
-        orders = taminotchi.xarid_buyurtmalari.exclude(
-            holat='bekor_qilingan'
+        from user.models import Xodim
+        employee = request.user.xodim if hasattr(request.user, 'xodim') else (Xodim.objects.filter(biznes=taminotchi.biznes).first() if taminotchi.biznes else Xodim.objects.first())
+
+        from django.db import models
+        orders = taminotchi.xarid_buyurtmalari.filter(
+            holat__in=['rasmiylashtirilgan', 'qabul_qilingan']
         ).filter(
-            nasiya_summa__gt=0
+            models.Q(nasiya_summa__gt=0) | models.Q(tolangan_summa__lt=models.F('umumiy_summa'))
         ).order_by('yaratilgan_vaqt')
 
         remaining = amount_decimal
@@ -117,7 +190,10 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
                 for order in orders:
                     if remaining <= 0:
                         break
-                    pay_to_order = min(order.nasiya_summa, remaining)
+                    order_debt = order.nasiya_summa if order.nasiya_summa > 0 else (order.umumiy_summa - order.tolangan_summa)
+                    if order_debt <= 0:
+                        continue
+                    pay_to_order = min(order_debt, remaining)
                     order.add_payment(pay_to_order, tolov_turi, employee)
                     remaining -= pay_to_order
 
@@ -132,6 +208,22 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
             "tolangan_summa": str(amount_decimal),
             "taminotchi_balansi": str(taminotchi.balans)
         }, status=status.HTTP_200_OK)
+
+    def partial_update(self, request, *args, **kwargs):
+        payment_keys = ('tolov', 'pay', 'tolov_summasi', 'tolovSummasi', 'amount', 'summa')
+        if any(k in request.data for k in payment_keys):
+            return self.pay(request, pk=kwargs.get('pk'))
+        return super().partial_update(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        payment_keys = ('tolov', 'pay', 'tolov_summasi', 'tolovSummasi', 'amount', 'summa')
+        if any(k in request.data for k in payment_keys):
+            return self.pay(request, pk=kwargs.get('pk'))
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post', 'patch', 'put'], url_path='tolov')
+    def tolov_pay(self, request, pk=None):
+        return self.pay(request, pk)
 
     @action(detail=True, methods=['get'])
     def card(self, request, pk=None):
@@ -429,10 +521,37 @@ class TaminotchiViewSet(viewsets.ModelViewSet):
             tolovlar=Sum('tolangan_summa'),
             qarz=Sum(ExpressionWrapper(F('umumiy_summa') - F('tolangan_summa'), output_field=DecimalField()))
         )
+
+        b_sum = str(sums['buyurtmalar'] or Decimal('0.00'))
+        t_sum = str(sums['tolovlar'] or Decimal('0.00'))
+        q_sum = str(sums['qarz'] or Decimal('0.00'))
+        cnt = queryset.count()
         
         return Response({
-            "yetkazib_beruvchilar_soni": queryset.count(),
-            "umumiy_buyurtmalar_summasi": str(sums['buyurtmalar'] or Decimal('0.00')),
-            "umumiy_tolovlar_summasi": str(sums['tolovlar'] or Decimal('0.00')),
-            "umumiy_qarz_summasi": str(sums['qarz'] or Decimal('0.00'))
+            "yetkazib_beruvchilar_soni": cnt,
+            "yetkazibBeruvchilarSoni": cnt,
+            "count": cnt,
+
+            "umumiy_buyurtmalar_summasi": b_sum,
+            "jami_buyurtmalar_summasi": b_sum,
+            "jamiBuyurtmalarSummasi": b_sum,
+            "buyurtmalar_summasi": b_sum,
+            "buyurtmalarSummasi": b_sum,
+
+            "umumiy_tolovlar_summasi": t_sum,
+            "jami_tolovlar_summasi": t_sum,
+            "jamiTolovlarSummasi": t_sum,
+            "tolovlar_summasi": t_sum,
+            "tolovlarSummasi": t_sum,
+
+            "umumiy_qarz_summasi": q_sum,
+            "jami_qarz_summasi": q_sum,
+            "jamiQarzSummasi": q_sum,
+            "jami_qarz": q_sum,
+            "jamiQarz": q_sum,
+            "qarz_summasi": q_sum,
+            "qarzSummasi": q_sum,
+            "qarz": q_sum,
+            "total_debt": q_sum,
+            "totalDebt": q_sum
         }, status=status.HTTP_200_OK)

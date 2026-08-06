@@ -26,3 +26,7 @@ Thumbs.db
 node_modules/
 dist/
 npm-debug.log*
+*.bak
+error_log.txt
+scratch/
+

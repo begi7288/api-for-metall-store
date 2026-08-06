@@ -29,7 +29,18 @@ class MahsulotBrendSerializer(serializers.ModelSerializer):
                 nomi = self.instance.nomi
             else:
                 raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
-        attrs['nomi'] = nomi
+        
+        # Prevent duplicates (case-insensitive) for this business
+        request = self.context.get('request')
+        if request and request.user and hasattr(request.user, 'xodim') and request.user.xodim.biznes:
+            biznes = request.user.xodim.biznes
+            qs = MahsulotBrend.objects.filter(biznes=biznes, nomi__iexact=nomi.strip())
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'nomi': "Bunday nomli brend allaqachon mavjud."})
+
+        attrs['nomi'] = nomi.strip()
         attrs.pop('name', None)
         return attrs
 
@@ -51,7 +62,18 @@ class MahsulotToifasiSerializer(serializers.ModelSerializer):
                 nomi = self.instance.nomi
             else:
                 raise serializers.ValidationError({'nomi': "Nomi kiritilishi shart."})
-        attrs['nomi'] = nomi
+
+        # Prevent duplicates (case-insensitive) for this business
+        request = self.context.get('request')
+        if request and request.user and hasattr(request.user, 'xodim') and request.user.xodim.biznes:
+            biznes = request.user.xodim.biznes
+            qs = MahsulotToifasi.objects.filter(biznes=biznes, nomi__iexact=nomi.strip())
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'nomi': "Bunday nomli kategoriya allaqachon mavjud."})
+
+        attrs['nomi'] = nomi.strip()
         attrs.pop('name', None)
         return attrs
 
@@ -92,16 +114,30 @@ DEFAULT_PAGE_KEYS = [
 ]
 
 def get_default_huquqlar(role_id='admin'):
-    is_admin = (role_id == 'admin')
-    return {
-        key: {
-            "view": True,
-            "create": is_admin,
-            "edit": is_admin,
-            "delete": is_admin
+    role_id = str(role_id).lower().strip()
+    res = {}
+    for key in DEFAULT_PAGE_KEYS:
+        view = False
+        create = False
+        edit = False
+        delete = False
+        
+        if role_id == 'admin':
+            view = create = edit = delete = True
+        elif role_id == 'sotuvchi':
+            if key in ('sotuv_pos', 'sotuvlar', 'mijozlar', 'cheklar'):
+                view = create = edit = delete = True
+        elif role_id == 'omborchi':
+            if key in ('ombor', 'kirimlar', 'taminotchilar', 'kategoriyalar', 'olchov_birliklari'):
+                view = create = edit = delete = True
+                
+        res[key] = {
+            "view": view,
+            "create": create,
+            "edit": edit,
+            "delete": delete
         }
-        for key in DEFAULT_PAGE_KEYS
-    }
+    return res
 
 class XodimRoliSerializer(serializers.ModelSerializer):
     nomi = serializers.CharField(required=False)
@@ -143,9 +179,13 @@ class XodimRoliSerializer(serializers.ModelSerializer):
         attrs['role_id'] = role_id
         attrs.pop('roleId', None)
 
-        huquqlar = attrs.get('huquqlar')
-        if not huquqlar:
-            attrs['huquqlar'] = get_default_huquqlar(role_id)
+        if 'huquqlar' in attrs:
+            huquqlar = attrs.get('huquqlar')
+            if not huquqlar:
+                attrs['huquqlar'] = get_default_huquqlar(role_id)
+        else:
+            if not self.instance or not getattr(self.instance, 'huquqlar', None):
+                attrs['huquqlar'] = get_default_huquqlar(role_id)
         return attrs
 
 
@@ -170,11 +210,14 @@ class CategoriesViewSet(viewsets.ModelViewSet):
         queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
         if not queryset.exists() and not MahsulotToifasi.objects.filter(biznes=biznes).exists():
             existing_cats = Mahsulot.objects.filter(biznes=biznes).exclude(toifa__isnull=True).exclude(toifa="").values_list('toifa', flat=True).distinct()
-            cats_to_create = list(existing_cats)
-            if cats_to_create:
-                toifalar = [MahsulotToifasi(biznes=biznes, nomi=cat) for cat in cats_to_create]
-                MahsulotToifasi.objects.bulk_create(toifalar)
-                queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
+            seen = set()
+            for cat in existing_cats:
+                cat_clean = cat.strip() if cat else ""
+                if cat_clean and cat_clean.lower() not in seen:
+                    seen.add(cat_clean.lower())
+                    if not MahsulotToifasi.objects.filter(biznes=biznes, nomi__iexact=cat_clean).exists():
+                        MahsulotToifasi.objects.get_or_create(biznes=biznes, nomi=cat_clean)
+            queryset = MahsulotToifasi.objects.filter(biznes=biznes).order_by('nomi')
 
         is_active_param = self.request.query_params.get('is_active')
         archive_param = self.request.query_params.get('archive')
@@ -227,11 +270,14 @@ class BrandsViewSet(viewsets.ModelViewSet):
         queryset = MahsulotBrend.objects.filter(biznes=biznes).order_by('nomi')
         if not queryset.exists() and not MahsulotBrend.objects.filter(biznes=biznes).exists():
             existing_brands = Mahsulot.objects.filter(biznes=biznes).exclude(brend__isnull=True).values_list('brend__nomi', flat=True).distinct()
-            brands_to_create = list(existing_brands)
-            if brands_to_create:
-                brendlar = [MahsulotBrend(biznes=biznes, nomi=b) for b in brands_to_create if b]
-                MahsulotBrend.objects.bulk_create(brendlar)
-                queryset = MahsulotBrend.objects.filter(biznes=biznes).order_by('nomi')
+            seen = set()
+            for b in existing_brands:
+                b_clean = b.strip() if b else ""
+                if b_clean and b_clean.lower() not in seen:
+                    seen.add(b_clean.lower())
+                    if not MahsulotBrend.objects.filter(biznes=biznes, nomi__iexact=b_clean).exists():
+                        MahsulotBrend.objects.get_or_create(biznes=biznes, nomi=b_clean)
+            queryset = MahsulotBrend.objects.filter(biznes=biznes).order_by('nomi')
 
         is_active_param = self.request.query_params.get('is_active')
         archive_param = self.request.query_params.get('archive')
@@ -368,6 +414,10 @@ class ArchiveListAPIView(APIView):
         biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim') and user.xodim.biznes) else None
         
         archive_items = []
+
+        # Debug logging to identify archive list behavior
+        with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+            f.write(f"ArchiveListAPIView request by {user}: authenticated={user.is_authenticated}, hasattr_xodim={hasattr(user, 'xodim')}, biznes={biznes}\n")
         
         # Inactive Products
         products = Mahsulot.objects.filter(is_active=False).prefetch_related('qoldiqlar', 'shtrix_kodlar').order_by('-yangilangan_vaqt')

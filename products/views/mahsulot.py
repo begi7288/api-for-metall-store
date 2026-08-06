@@ -163,6 +163,12 @@ class MahsulotViewSet(viewsets.ModelViewSet):
         return super().filter_queryset(queryset)
 
     def list(self, request, *args, **kwargs):
+        is_active_param = request.query_params.get('is_active')
+        if is_active_param is not None:
+            queryset = self.filter_queryset(self.get_queryset())
+            with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+                f.write(f"Mahsulot list: user={request.user}, is_active={is_active_param}, count={queryset.count()}\n")
+
         if request.query_params.get('export') in ['csv', 'excel']:
             import csv
             from django.http import HttpResponse
@@ -234,9 +240,13 @@ class MahsulotViewSet(viewsets.ModelViewSet):
         if action_type == 'delete':
             queryset.delete()
         elif action_type == 'archive':
-            queryset.update(is_active=False)
+            for prod in queryset.filter(is_active=True):
+                prod.is_active = False
+                prod.save(update_fields=['is_active'])
         elif action_type == 'unarchive':
-            queryset.update(is_active=True)
+            for prod in queryset.filter(is_active=False):
+                prod.is_active = True
+                prod.save(update_fields=['is_active'])
         elif action_type == 'change_category':
             toifa = request.data.get('toifa')
             if toifa:
@@ -584,7 +594,9 @@ class MahsulotViewSet(viewsets.ModelViewSet):
                 archive_bool = bool(archive)
             
             is_active_val = not archive_bool
-            queryset.update(is_active=is_active_val)
+            for prod in queryset.filter(is_active=not is_active_val):
+                prod.is_active = is_active_val
+                prod.save(update_fields=['is_active'])
             return Response({"success": True, "message": "Mahsulotlar holati ommaviy o'zgartirildi."}, status=status.HTTP_200_OK)
 
         else:
@@ -646,6 +658,18 @@ class MahsulotViewSet(viewsets.ModelViewSet):
             "cost_value": cost_value,
             "retail_value": retail_value,
             "unit_breakdown": unit_breakdown
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='toggle_archive')
+    def toggle_archive(self, request, pk=None):
+        product = self.get_object()
+        product.is_active = not product.is_active
+        product.save(update_fields=['is_active'])
+        status_str = "arxivlandi" if not product.is_active else "tiklandi"
+        return Response({
+            "success": True,
+            "detail": f"Mahsulot muvaffaqiyatli {status_str}.",
+            "is_active": product.is_active
         }, status=status.HTTP_200_OK)
 
 

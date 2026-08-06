@@ -34,13 +34,14 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     holat = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     pin_code = serializers.CharField(source='pin_kod', required=False, allow_null=True, allow_blank=True)
+    role_name = serializers.CharField(required=False, write_only=True)
 
     class Meta:
         model = Xodim
         fields = [
             'id', 'biznes', 'ism', 'familiya', 'telefon_raqam', 'telefon', 'tel', 'parol', 'parolni_tasdiqlash',
             'rol', 'jinsi', 'tugilgan_sana', 'is_active', 'pin_kod', 'pin_code', 'fish', 'full_name', 'fullName', 'dokon', 'dokon_nomi',
-            'holat', 'status', 'yaratilgan_vaqt', 'yangilangan_vaqt'
+            'holat', 'status', 'yaratilgan_vaqt', 'yangilangan_vaqt', 'role_name'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
@@ -65,7 +66,29 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     def get_status(self, obj):
         return self.get_holat(obj)
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['role_name'] = (instance.rol or 'sotuvchi').capitalize()
+        ret['first_name'] = instance.ism or ''
+        ret['last_name'] = instance.familiya or ''
+        ret['phone'] = instance.telefon_raqam or ''
+        ret['login'] = instance.telefon_raqam or ''
+        return ret
+
     def validate(self, attrs):
+        # Map role_name to rol if role_name is provided
+        role_name = attrs.pop('role_name', None)
+        if role_name:
+            rn = role_name.strip().lower()
+            if rn in ('omborchi',):
+                attrs['rol'] = 'omborchi'
+            elif rn in ('sotuvchi', 'kassir'):
+                attrs['rol'] = 'sotuvchi'
+            elif rn in ('admin', 'administrator', 'boshliq', 'ceo'):
+                attrs['rol'] = 'admin'
+            else:
+                attrs['rol'] = rn
+
         # 1. Prevent role escalation (non-admin/non-omborchi cannot change rol or is_active)
         request = self.context.get('request')
         if request and request.user and request.user.is_authenticated:
@@ -115,6 +138,7 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         
         temp_attrs.update(attrs)
         temp_attrs.pop('id', None)
+        temp_attrs.pop('role_name', None)
         
         temp_instance = Xodim(**temp_attrs)
         try:
@@ -130,8 +154,31 @@ class XodimSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
 class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     familiya = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    telefon_raqam_1 = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
     telefon_raqam_2 = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
     manzil = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            jinsi = data.get('jinsi')
+            if isinstance(jinsi, str):
+                jinsi_val = jinsi.strip().lower()
+                if 'erkak' in jinsi_val or jinsi_val == 'male':
+                    data['jinsi'] = 'erkak'
+                elif 'ayol' in jinsi_val or jinsi_val == 'female':
+                    data['jinsi'] = 'ayol'
+            for phone_field in ['telefon_raqam_1', 'telefon_raqam_2']:
+                val = data.get(phone_field)
+                if isinstance(val, str):
+                    cleaned_val = val.strip()
+                    if cleaned_val in ['+998', '+7', '+996', '+992', ''] or not cleaned_val:
+                        data[phone_field] = ""
+                    else:
+                        data[phone_field] = cleaned_val
+                elif val is None:
+                    data[phone_field] = ""
+        return super().to_internal_value(data)
 
     xaridlar_summasi = serializers.SerializerMethodField(read_only=True)
     oxirgi_xarid = serializers.SerializerMethodField(read_only=True)
@@ -152,6 +199,18 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     xaridlar = serializers.SerializerMethodField(read_only=True)
     tolovlar = serializers.SerializerMethodField(read_only=True)
 
+    # CamelCase aliases
+    customerName = serializers.SerializerMethodField(read_only=True)
+    fullName = serializers.SerializerMethodField(read_only=True)
+    oxirgiTranzaksiyaQarzi = serializers.SerializerMethodField(read_only=True)
+    yigilganQarz = serializers.SerializerMethodField(read_only=True)
+    umumiyBalans = serializers.SerializerMethodField(read_only=True)
+    qarzSummasi = serializers.SerializerMethodField(read_only=True)
+    jamiCheklar = serializers.SerializerMethodField(read_only=True)
+    xaridlarSummasi = serializers.SerializerMethodField(read_only=True)
+    oxirgiXarid = serializers.SerializerMethodField(read_only=True)
+    createdAt = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
+
     class Meta:
         model = Mijoz
         fields = [
@@ -159,7 +218,9 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             'jinsi', 'telefon_raqam_1', 'telefon_raqam_2', 'phone', 'manzil',
             'xaridlar_summasi', 'oxirgi_xarid', 'oxirgi_tranzaksiya_qarzi', 'yigilgan_qarz', 'umumiy_balans',
             'qarz_summasi', 'jami_cheklar', 'xaridlar', 'tolovlar',
-            'yaratilgan_vaqt', 'yangilangan_vaqt', 'royshatdan_otgan_sana', 'created_at'
+            'yaratilgan_vaqt', 'yangilangan_vaqt', 'royshatdan_otgan_sana', 'created_at',
+            'customerName', 'fullName', 'oxirgiTranzaksiyaQarzi', 'yigilganQarz', 'umumiyBalans',
+            'qarzSummasi', 'jamiCheklar', 'xaridlarSummasi', 'oxirgiXarid', 'createdAt'
         ]
         read_only_fields = ['biznes', 'yaratilgan_vaqt', 'yangilangan_vaqt']
 
@@ -170,11 +231,20 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     def get_full_name(self, obj):
         return self.get_fish(obj)
 
+    def get_customerName(self, obj):
+        return self.get_fish(obj)
+
+    def get_fullName(self, obj):
+        return self.get_fish(obj)
+
     def get_oxirgi_tranzaksiya_qarzi(self, obj):
-        last_sale = obj.sotuvlar.filter(holat='yakunlangan').order_by('-yaratilgan_vaqt').first()
+        last_sale = obj.sotuvlar.filter(holat='yakunlangan', nasiya_summa__gt=0).order_by('-yaratilgan_vaqt').first()
         if last_sale:
             return str(last_sale.nasiya_summa)
         return '0.00'
+
+    def get_oxirgiTranzaksiyaQarzi(self, obj):
+        return self.get_oxirgi_tranzaksiya_qarzi(obj)
 
     def get_yigilgan_qarz(self, obj):
         from django.db.models import Sum
@@ -184,14 +254,26 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             q = obj.sotuvlar.filter(holat='yakunlangan', nasiya_summa__gt=0).aggregate(t=Sum('nasiya_summa'))['t'] or Decimal('0.00')
         return str(q)
 
+    def get_yigilganQarz(self, obj):
+        return self.get_yigilgan_qarz(obj)
+
     def get_umumiy_balans(self, obj):
         return self.get_yigilgan_qarz(obj)
+
+    def get_umumiyBalans(self, obj):
+        return self.get_umumiy_balans(obj)
 
     def get_qarz_summasi(self, obj):
         return self.get_yigilgan_qarz(obj)
 
+    def get_qarzSummasi(self, obj):
+        return self.get_qarz_summasi(obj)
+
     def get_jami_cheklar(self, obj):
         return obj.sotuvlar.filter(holat='yakunlangan').count()
+
+    def get_jamiCheklar(self, obj):
+        return self.get_jami_cheklar(obj)
 
     def get_xaridlar(self, obj):
         from sales.serializers import SaleSerializer
@@ -225,6 +307,12 @@ class MijozSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             return obj.annotated_oxirgi_xarid
         last_sale = obj.sotuvlar.filter(holat='yakunlangan').order_by('-yaratilgan_vaqt').first()
         return last_sale.yaratilgan_vaqt if last_sale else None
+
+    def get_xaridlarSummasi(self, obj):
+        return self.get_xaridlar_summasi(obj)
+
+    def get_oxirgiXarid(self, obj):
+        return self.get_oxirgi_xarid(obj)
 
     def validate(self, attrs):
         instance = self.instance
@@ -453,8 +541,45 @@ class BiznesSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
 
     class Meta:
         model = Biznes
-        fields = ['id', 'nomi', 'egasi_ism', 'tarif', 'tarif_nomi', 'yaratilgan_vaqt', 'yangilangan_vaqt']
+        fields = [
+            'id', 'nomi', 'egasi_ism', 'tarif', 'tarif_nomi',
+            'telefon', 'soha', 'manzil', 'yuridik_nomi', 'yuridik_manzil',
+            'mamlakat', 'pochta_indeksi', 'inn', 'mfo',
+            'yaratilgan_vaqt', 'yangilangan_vaqt'
+        ]
         read_only_fields = ['yaratilgan_vaqt', 'yangilangan_vaqt']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['company_name'] = instance.nomi
+        ret['phone'] = instance.telefon
+        ret['industry'] = instance.soha
+        ret['address'] = instance.manzil
+        ret['legal_name'] = instance.yuridik_nomi
+        ret['legal_address'] = instance.yuridik_manzil
+        ret['country'] = instance.mamlakat
+        ret['postal_code'] = instance.pochta_indeksi
+        return ret
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'company_name' in data and 'nomi' not in data:
+            data['nomi'] = data['company_name']
+        if 'phone' in data and 'telefon' not in data:
+            data['telefon'] = data['phone']
+        if 'industry' in data and 'soha' not in data:
+            data['soha'] = data['industry']
+        if 'address' in data and 'manzil' not in data:
+            data['manzil'] = data['address']
+        if 'legal_name' in data and 'yuridik_nomi' not in data:
+            data['yuridik_nomi'] = data['legal_name']
+        if 'legal_address' in data and 'yuridik_manzil' not in data:
+            data['yuridik_manzil'] = data['legal_address']
+        if 'country' in data and 'mamlakat' not in data:
+            data['mamlakat'] = data['country']
+        if 'postal_code' in data and 'pochta_indeksi' not in data:
+            data['pochta_indeksi'] = data['postal_code']
+        return super().to_internal_value(data)
 
     def validate(self, attrs):
         tarif = attrs.get('tarif')

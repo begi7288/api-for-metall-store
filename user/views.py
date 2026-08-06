@@ -29,8 +29,19 @@ class LoginAPIView(APIView):
         return Response({"detail": "Tizimga kirish uchun ushbu sahifada POST so'rovini yuboring."}, status=status.HTTP_200_OK)
 
     def post(self, request, *args, **kwargs):
+        try:
+            with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+                f.write(f"\nLOGIN_POST: data={request.data}\n")
+        except Exception:
+            pass
         serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            try:
+                with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+                    f.write(f"LOGIN_VALIDATION_ERRORS: {serializer.errors}\n")
+            except Exception:
+                pass
+            serializer.is_valid(raise_exception=True)
 
         from rest_framework.exceptions import ValidationError as DRFValidationError, PermissionDenied
         from django.contrib.auth.models import User
@@ -79,6 +90,8 @@ class LoginAPIView(APIView):
                         raise PermissionDenied("Ushbu xodim faol emas.")
 
                     pwd_valid = check_password(parol, xodim.parol) or (str(xodim.parol).strip() == parol)
+                    if not pwd_valid and xodim.user:
+                        pwd_valid = xodim.user.check_password(parol)
                     pin_valid = bool(xodim.pin_kod) and (str(xodim.pin_kod).strip() == parol or str(xodim.pin_kod).strip() == pin_val)
 
                     if not (pwd_valid or pin_valid):
@@ -145,7 +158,10 @@ class LoginAPIView(APIView):
                         # Fallback 1: match xodim.parol or xodim.pin_kod
                         matching_xodims = []
                         for x in Xodim.objects.filter(is_active=True):
-                            if check_password(target_pin, x.parol) or str(x.parol).strip() == target_pin or (x.pin_kod and str(x.pin_kod).strip() == target_pin):
+                            pwd_match = check_password(target_pin, x.parol) or str(x.parol).strip() == target_pin
+                            if not pwd_match and x.user:
+                                pwd_match = x.user.check_password(target_pin)
+                            if pwd_match or (x.pin_kod and str(x.pin_kod).strip() == target_pin):
                                 matching_xodims.append(x)
                         if len(matching_xodims) == 1:
                             xodim = matching_xodims[0]
@@ -175,6 +191,11 @@ class LoginAPIView(APIView):
 
             if not user_obj:
                 check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
+                try:
+                    with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+                        f.write(f"LOGIN_ERROR: user_obj is None. Raw phone={raw_phone}, parsed={telefon_raqam}, parol={parol}\n")
+                except Exception:
+                    pass
                 raise DRFValidationError({'detail': GENERIC_ERROR})
 
             token, created = Token.objects.get_or_create(user=user_obj)
@@ -186,51 +207,142 @@ class LoginAPIView(APIView):
             user_ism = ism or (user_obj.first_name if user_obj else "")
             user_familiya = familiya or (user_obj.last_name if user_obj else "")
             xodim_pin = xodim.pin_kod if xodim else ""
+            user_phone = xodim.telefon_raqam if xodim else user_obj.username
+            user_id = xodim.id if xodim else user_obj.id
+
+            huquqlar = {}
+            if xodim:
+                from user.extra_views import get_default_huquqlar
+                from user.models import XodimRoli
+                roli = XodimRoli.objects.filter(biznes=xodim.biznes, role_id=xodim.rol).first()
+                huquqlar = roli.huquqlar if (roli and roli.huquqlar) else get_default_huquqlar(xodim.rol)
+
+            def check_perm(hq, key):
+                val = hq.get(key)
+                if isinstance(val, dict):
+                    return bool(val.get('view'))
+                return bool(val)
+
+            is_boss = role in ('admin', 'boshliq', 'ceo')
+            can_sell = True if is_boss else check_perm(huquqlar, 'sotuv_pos') or check_perm(huquqlar, 'sotuvlar')
+            can_income = True if is_boss else check_perm(huquqlar, 'ombor') or check_perm(huquqlar, 'kirimlar')
+            can_view_reports = True if is_boss else check_perm(huquqlar, 'sales_panel') or check_perm(huquqlar, 'dashboard')
+            can_manage_users = True if is_boss else check_perm(huquqlar, 'xodimlar') or check_perm(huquqlar, 'lavozimlar') or check_perm(huquqlar, 'sozlamalar')
+
+            role_obj = {
+                'name': role.capitalize() if role else 'Boshliq',
+                'role_name': role.capitalize() if role else 'Boshliq',
+                'can_sell': can_sell,
+                'can_income': can_income,
+                'can_view_reports': can_view_reports,
+                'can_manage_users': can_manage_users,
+                'page_permissions': huquqlar
+            }
 
             return Response({
                 'success': True,
                 'token': token.key,
                 'token_key': token.key,
                 'access_token': token.key,
+                'access': token.key,
                 'accessToken': token.key,
                 'auth_token': token.key,
                 'authToken': token.key,
                 'key': token.key,
                 'ism': user_ism,
                 'familiya': user_familiya,
+                'first_name': user_ism,
+                'lastName': user_familiya,
+                'last_name': user_familiya,
+                'phone': user_phone,
+                'telefon_raqam': user_phone,
                 'rol': role,
-                'role': role,
+                'role': role_obj,
+                'role_name': role_obj['name'],
                 'pin_kod': xodim_pin,
                 'pin_code': xodim_pin,
+                'page_permissions': huquqlar,
                 'user': {
-                    'id': user_obj.id,
-                    'username': user_obj.username,
+                    'id': user_id,
+                    'user_id': user_id,
+                    'username': user_phone,
                     'ism': user_ism,
                     'familiya': user_familiya,
+                    'first_name': user_ism,
+                    'lastName': user_familiya,
+                    'last_name': user_familiya,
+                    'phone': user_phone,
+                    'telefon_raqam': user_phone,
                     'rol': role,
-                    'role': role,
+                    'role': role_obj,
+                    'role_name': role_obj['name'],
                     'pin_kod': xodim_pin,
                     'pin_code': xodim_pin,
+                    'page_permissions': huquqlar,
+                },
+                'employee': {
+                    'id': user_id,
+                    'user_id': user_id,
+                    'username': user_phone,
+                    'ism': user_ism,
+                    'familiya': user_familiya,
+                    'first_name': user_ism,
+                    'lastName': user_familiya,
+                    'last_name': user_familiya,
+                    'phone': user_phone,
+                    'telefon_raqam': user_phone,
+                    'rol': role,
+                    'role': role_obj,
+                    'role_name': role_obj['name'],
+                    'pin_kod': xodim_pin,
+                    'pin_code': xodim_pin,
+                    'page_permissions': huquqlar,
                 },
                 'data': {
                     'token': token.key,
                     'access_token': token.key,
                     'user': {
-                        'id': user_obj.id,
-                        'username': user_obj.username,
+                        'id': user_id,
+                        'user_id': user_id,
+                        'username': user_phone,
                         'ism': user_ism,
                         'familiya': user_familiya,
+                        'first_name': user_ism,
+                        'lastName': user_familiya,
+                        'last_name': user_familiya,
+                        'phone': user_phone,
+                        'telefon_raqam': user_phone,
                         'rol': role,
-                        'role': role,
+                        'role': role_obj,
+                        'role_name': role_obj['name'],
                         'pin_kod': xodim_pin,
                         'pin_code': xodim_pin,
+                        'page_permissions': huquqlar,
+                    },
+                    'employee': {
+                        'id': user_id,
+                        'user_id': user_id,
+                        'username': user_phone,
+                        'ism': user_ism,
+                        'familiya': user_familiya,
+                        'first_name': user_ism,
+                        'lastName': user_familiya,
+                        'last_name': user_familiya,
+                        'phone': user_phone,
+                        'telefon_raqam': user_phone,
+                        'rol': role,
+                        'role': role_obj,
+                        'role_name': role_obj['name'],
+                        'pin_kod': xodim_pin,
+                        'pin_code': xodim_pin,
+                        'page_permissions': huquqlar,
                     }
                 },
                 'redirect_url': '/users/me/'
             }, status=status.HTTP_200_OK)
 
         except (DRFValidationError, PermissionDenied) as e:
-            raise
+            raise e
 
 
 class PinLoginAPIView(LoginAPIView):
@@ -259,8 +371,36 @@ class MeAPIView(APIView):
 
     def get(self, request, *args, **kwargs):
         user = request.user
+        from user.extra_views import get_default_huquqlar
+        from user.models import XodimRoli
+
+        def check_perm(hq, key):
+            val = hq.get(key)
+            if isinstance(val, dict):
+                return bool(val.get('view'))
+            return bool(val)
+
         if hasattr(user, 'xodim'):
             xodim = user.xodim
+            roli = XodimRoli.objects.filter(biznes=xodim.biznes, role_id=xodim.rol).first()
+            huquqlar = roli.huquqlar if (roli and roli.huquqlar) else get_default_huquqlar(xodim.rol)
+
+            is_boss = xodim.rol in ('admin', 'boshliq', 'ceo')
+            can_sell = True if is_boss else check_perm(huquqlar, 'sotuv_pos') or check_perm(huquqlar, 'sotuvlar')
+            can_income = True if is_boss else check_perm(huquqlar, 'ombor') or check_perm(huquqlar, 'kirimlar')
+            can_view_reports = True if is_boss else check_perm(huquqlar, 'sales_panel') or check_perm(huquqlar, 'dashboard')
+            can_manage_users = True if is_boss else check_perm(huquqlar, 'xodimlar') or check_perm(huquqlar, 'lavozimlar') or check_perm(huquqlar, 'sozlamalar')
+
+            role_obj = {
+                'name': xodim.rol.capitalize() if xodim.rol else 'Boshliq',
+                'role_name': xodim.rol.capitalize() if xodim.rol else 'Boshliq',
+                'can_sell': can_sell,
+                'can_income': can_income,
+                'can_view_reports': can_view_reports,
+                'can_manage_users': can_manage_users,
+                'page_permissions': huquqlar
+            }
+
             data = {
                 "id": xodim.id,
                 "ism": xodim.ism,
@@ -280,9 +420,28 @@ class MeAPIView(APIView):
                 "mavzu": xodim.mavzu or "Yorug'",
                 "theme": xodim.mavzu or "Yorug'",
                 "yaratilgan_vaqt": xodim.yaratilgan_vaqt,
-                "yangilangan_vaqt": xodim.yangilangan_vaqt
+                "yangilangan_vaqt": xodim.yangilangan_vaqt,
+                "huquqlar": huquqlar,
+                "permissions": huquqlar,
+                "role": role_obj,
+                "role_name": role_obj['name'],
+                "can_sell": can_sell,
+                "can_income": can_income,
+                "can_view_reports": can_view_reports,
+                "can_manage_users": can_manage_users,
+                "page_permissions": huquqlar
             }
         else:
+            huquqlar = get_default_huquqlar('admin')
+            role_obj = {
+                'name': 'Admin',
+                'role_name': 'Admin',
+                'can_sell': True,
+                'can_income': True,
+                'can_view_reports': True,
+                'can_manage_users': True,
+                'page_permissions': huquqlar
+            }
             data = {
                 "id": None,
                 "ism": user.first_name if user.first_name else "Boshliq",
@@ -298,7 +457,16 @@ class MeAPIView(APIView):
                 "til": "O'zbekcha",
                 "mavzu": "Yorug'",
                 "yaratilgan_vaqt": user.date_joined,
-                "yangilangan_vaqt": user.date_joined
+                "yangilangan_vaqt": user.date_joined,
+                "huquqlar": huquqlar,
+                "permissions": huquqlar,
+                "role": role_obj,
+                "role_name": role_obj['name'],
+                "can_sell": True,
+                "can_income": True,
+                "can_view_reports": True,
+                "can_manage_users": True,
+                "page_permissions": huquqlar
             }
 
         return Response({"success": True, "data": data, **data}, status=status.HTTP_200_OK)
@@ -690,6 +858,44 @@ class MijozViewSet(viewsets.ModelViewSet):
             'tugilgan_kunlar': tugilgan_kunlar,
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post'], url_path='remind-debt')
+    def remind_debt(self, request):
+        user = request.user
+        biznes = user.xodim.biznes if (user.is_authenticated and hasattr(user, 'xodim')) else None
+        if not biznes:
+            return Response({'detail': "Biznes topilmadi."}, status=status.HTTP_400_BAD_REQUEST)
+
+        mijoz_ids = request.data.get('mijoz_ids', [])
+        
+        from user.models import Mijoz, MijozQarzi
+        from django.db.models import Sum
+        from decimal import Decimal
+        from user.telegram_bot import send_telegram_message
+
+        qs = Mijoz.objects.filter(biznes=biznes, telegram_chat_id__isnull=False).exclude(telegram_chat_id="")
+        if mijoz_ids:
+            qs = qs.filter(id__in=mijoz_ids)
+
+        sent_count = 0
+        for mijoz in qs:
+            total_qarz = MijozQarzi.objects.filter(mijoz=mijoz).exclude(holat='tolangan').aggregate(total=Sum('qoldiq_summa'))['total'] or Decimal('0.00')
+            if total_qarz > 0:
+                msg = (
+                    f"Assalomu alaykum, <b>{mijoz.ism} {mijoz.familiya or ''}</b>!\n\n"
+                    f"⚠️ Sizning <b>{biznes.nomi}</b> do'konidan <code>{total_qarz:,.0f}</code> so'm qarz qoldig'ingiz bor.\n"
+                    f"Iltimos, o'z vaqtida to'lov qilishni unutmang. Rahmat!"
+                )
+                try:
+                    send_telegram_message(msg, chat_id=str(mijoz.telegram_chat_id).strip())
+                    sent_count += 1
+                except Exception:
+                    pass
+
+        return Response({
+            'status': "Eslatmalar yuborildi.",
+            'yuborildi_soni': sent_count
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['get'])
     def card(self, request, pk=None):
         mijoz = self.get_object()
@@ -736,11 +942,25 @@ class MijozViewSet(viewsets.ModelViewSet):
                 qarz.tolangan_summa += needed
                 qarz.qoldiq_summa = Decimal('0.00')
                 qarz.holat = 'tolangan'
+                
+                # Update sotuv if exists
+                if qarz.sotuv:
+                    qarz.sotuv.tolangan_summa += needed
+                    qarz.sotuv.nasiya_summa = max(Decimal('0.00'), qarz.sotuv.nasiya_summa - needed)
+                    qarz.sotuv.save(update_fields=['tolangan_summa', 'nasiya_summa'])
+                
                 remaining -= needed
             else:
                 qarz.tolangan_summa += remaining
                 qarz.qoldiq_summa -= remaining
                 qarz.holat = 'qisman_tolangan'
+                
+                # Update sotuv if exists
+                if qarz.sotuv:
+                    qarz.sotuv.tolangan_summa += remaining
+                    qarz.sotuv.nasiya_summa = max(Decimal('0.00'), qarz.sotuv.nasiya_summa - remaining)
+                    qarz.sotuv.save(update_fields=['tolangan_summa', 'nasiya_summa'])
+                
                 remaining = Decimal('0.00')
             qarz.save()
 
@@ -777,9 +997,12 @@ class MijozViewSet(viewsets.ModelViewSet):
         xodim = request.user.xodim if (request.user.is_authenticated and hasattr(request.user, 'xodim')) else None
 
         for item in payments_data:
-            mijoz_id = item.get('mijoz_id') or item.get('customer_id') or item.get('mijoz')
+            mijoz_id = item.get('mijoz_id') or item.get('customer_id') or item.get('mijoz') or item.get('customer') or item.get('customerId')
+            if isinstance(mijoz_id, dict):
+                mijoz_id = mijoz_id.get('id')
+                
             summa_str = item.get('summa') or item.get('amount') or '0'
-            tolov_usuli = item.get('tolov_usuli') or item.get('payment_method') or 'naqd'
+            tolov_usuli = item.get('tolov_usuli') or item.get('payment_method') or item.get('paymentMethod') or 'naqd'
             eslatma = item.get('eslatma') or item.get('notes') or ''
 
             if not mijoz_id:
@@ -805,11 +1028,25 @@ class MijozViewSet(viewsets.ModelViewSet):
                     qarz.tolangan_summa += needed
                     qarz.qoldiq_summa = Decimal('0.00')
                     qarz.holat = 'tolangan'
+                    
+                    # Update sotuv if exists
+                    if qarz.sotuv:
+                        qarz.sotuv.tolangan_summa += needed
+                        qarz.sotuv.nasiya_summa = max(Decimal('0.00'), qarz.sotuv.nasiya_summa - needed)
+                        qarz.sotuv.save(update_fields=['tolangan_summa', 'nasiya_summa'])
+                    
                     remaining -= needed
                 else:
                     qarz.tolangan_summa += remaining
                     qarz.qoldiq_summa -= remaining
                     qarz.holat = 'qisman_tolangan'
+                    
+                    # Update sotuv if exists
+                    if qarz.sotuv:
+                        qarz.sotuv.tolangan_summa += remaining
+                        qarz.sotuv.nasiya_summa = max(Decimal('0.00'), qarz.sotuv.nasiya_summa - remaining)
+                        qarz.sotuv.save(update_fields=['tolangan_summa', 'nasiya_summa'])
+                    
                     remaining = Decimal('0.00')
                 qarz.save()
 

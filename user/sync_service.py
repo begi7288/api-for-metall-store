@@ -14,7 +14,7 @@ from user.models import (
 from products.models import (
     MahsulotToifasi, OlchovBirligi, Characteristic, Mahsulot, MahsulotRasm,
     MahsulotShtrixKod, Import, Dokon, DokonQoldiq, Transfer, Taminotchi,
-    WriteOff, WriteOffItem, XususiyatMaydoni, Toplam, ToplamElement, YorliqShablon
+    WriteOff, WriteOffItem, XususiyatMaydoni, Toplam, ToplamElement, YorliqShablon, MahsulotBrend
 )
 from sales.models import Sale, SaleItem, XarajatKategoriyasi, Xarajat
 from orders.models import (
@@ -163,9 +163,24 @@ def import_full_backup(backup_data, clear_existing=False, using='default'):
                 target_model = instance.__class__
                 pk_val = instance.pk
 
+                # Deduplicate by name/biznes for support models to prevent duplicate creations on sync
+                if target_model in [MahsulotToifasi, OlchovBirligi, MahsulotBrend, Taminotchi, XarajatKategoriyasi]:
+                    nomi_val = getattr(instance, 'nomi', None)
+                    biznes_val = getattr(instance, 'biznes', None)
+                    if nomi_val and biznes_val:
+                        match = target_model.objects.using(using).filter(biznes=biznes_val, nomi__iexact=nomi_val.strip()).first()
+                        if match:
+                            continue
+
                 if pk_val is not None and target_model.objects.using(using).filter(pk=pk_val).exists():
                     existing_obj = target_model.objects.using(using).get(pk=pk_val)
                     if is_same_entity(existing_obj, instance):
+                        try:
+                            with transaction.atomic(using=using):
+                                instance.save(using=using)
+                                deserialized_count += 1
+                        except Exception as e:
+                            logger.warning(f"Sync update skip {model_key} {instance}: {e}")
                         continue
                     else:
                         instance.pk = None

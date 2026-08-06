@@ -197,7 +197,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Tashkent'
 
 USE_I18N = True
 
@@ -286,18 +286,8 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
     ],
     'EXCEPTION_HANDLER': 'temirdokon_v1.exceptions.custom_exception_handler',
-    'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
-    ],
-    'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/day',
-        'user': '1000/day',
-        'login': '5/minute',
-        'phone': '5/minute',
-        'password_change': '3/minute',
-        'register': '3/hour',
-    }
+    'DEFAULT_THROTTLE_CLASSES': [],
+    'DEFAULT_THROTTLE_RATES': {}
 }
 
 # ============================================================

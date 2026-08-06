@@ -194,9 +194,11 @@ class Mijoz(BaseModel):
     otasining_ismi = models.CharField(max_length=100, blank=True, null=True)
     tugilgan_sana = models.DateField(blank=True, null=True)
     jinsi = models.CharField(max_length=10, choices=JINS_CHOICES)
-    telefon_raqam_1 = models.CharField(max_length=13)
+    telefon_raqam_1 = models.CharField(max_length=13, blank=True, null=True)
     telefon_raqam_2 = models.CharField(max_length=13, blank=True, null=True)
     manzil = models.CharField(max_length=255, blank=True, null=True)
+    telegram_chat_id = models.CharField(max_length=50, blank=True, null=True, db_index=True)
+    telegram_notifications_enabled = models.BooleanField(default=True)
 
     def clean(self):
         super().clean()
@@ -228,11 +230,8 @@ class Mijoz(BaseModel):
             if not phone.isdigit():
                 raise ValidationError({field_name: "Telefon raqami faqat raqamlardan iborat bo'lishi kerak (ixtiyoriy '+' belgisi bilan)."})
             
-            if len(phone) not in [9, 12]:
-                raise ValidationError({field_name: "Telefon raqami 9 yoki 12 ta raqamdan iborat bo'lishi kerak."})
-                
-            if has_plus and len(phone) != 12:
-                raise ValidationError({field_name: "+ bilan boshlangan telefon raqami 13 ta belgidan iborat bo'lishi kerak."})
+            if len(phone) < 7 or len(phone) > 15:
+                raise ValidationError({field_name: "Telefon raqami 7 dan 15 gacha raqamdan iborat bo'lishi kerak."})
 
         validate_phone(self.telefon_raqam_1, 'telefon_raqam_1')
         validate_phone(self.telefon_raqam_2, 'telefon_raqam_2')
@@ -307,6 +306,8 @@ class MijozQarzi(BaseModel):
             self.holat = 'tolangan'
         elif self.tolangan_summa > Decimal('0.00'):
             self.holat = 'qisman_tolangan'
+        else:
+            self.holat = 'tolanmagan'
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -453,13 +454,20 @@ class TelegramSession(BaseModel):
         ('AWAITING_PHONE', 'Telefon kutilmoqda'),
         ('AWAITING_PASSWORD', 'Parol kutilmoqda'),
         ('AUTHENTICATED', 'Avtorizatsiyadan o\'tgan'),
+        ('AUTHENTICATED_MIJOZ', 'Mijoz avtorizatsiyadan o\'tgan'),
+        ('AWAITING_BROADCAST_TYPE', 'Xabar turi kutilmoqda'),
+        ('AWAITING_DEBTOR_SELECTION', 'Mijoz tanlovi kutilmoqda'),
+        ('AWAITING_CONFIRM_ALL_DEBTORS', 'Tasdiqlash kutilmoqda (Barcha)'),
+        ('AWAITING_AD_TEXT', 'Reklama matni kutilmoqda'),
+        ('AWAITING_AD_RECIPIENT_TYPE', 'Reklama qabul qiluvchi turi kutilmoqda'),
     )
     chat_id = models.CharField(max_length=50, unique=True, db_index=True)
     xodim = models.ForeignKey(Xodim, on_delete=models.SET_NULL, null=True, blank=True, related_name='telegram_sessions')
+    mijoz = models.ForeignKey(Mijoz, on_delete=models.SET_NULL, null=True, blank=True, related_name='telegram_sessions')
     state = models.CharField(max_length=50, choices=STATE_CHOICES, default='AWAITING_PHONE')
-    temp_phone = models.CharField(max_length=20, blank=True, null=True)
+    temp_phone = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"TelegramSession(chat_id={self.chat_id}, state={self.state}, xodim={self.xodim})"
+        return f"TelegramSession(chat_id={self.chat_id}, state={self.state}, xodim={self.xodim}, mijoz={self.mijoz})"
 
 

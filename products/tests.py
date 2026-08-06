@@ -109,6 +109,58 @@ class MahsulotModelTest(TestCase):
         with self.assertRaises(ValidationError):
             prod_image.full_clean()
 
+    def test_archive_and_restore_expense_adjustment(self):
+        from sales.models import Xarajat
+        
+        # Create Biznes
+        biznes = Biznes.objects.create(nomi="Expense Test Biznes", egasi_ism="Owner")
+        
+        # Check initial expenses
+        self.assertEqual(Xarajat.objects.filter(biznes=biznes).count(), 0)
+        
+        # Create a new product (active)
+        product = Mahsulot.objects.create(
+            biznes=biznes,
+            nomi="Expense Test Product",
+            olchov_birligi="dona",
+            kelish_narxi=Decimal("2000.00"),
+            ustama=Decimal("10.00"),
+            miqdori=5
+        )
+        
+        # Creation should have created a Xarajat of 5 * 2000 = 10000.00
+        expenses = Xarajat.objects.filter(biznes=biznes)
+        self.assertEqual(expenses.count(), 1)
+        self.assertEqual(expenses.first().miqdor, Decimal("10000.00"))
+        
+        # Now archive the product
+        product.is_active = False
+        product.save(update_fields=['is_active'])
+        
+        # Archiving should have created a negative expense of -10000.00
+        expenses = Xarajat.objects.filter(biznes=biznes).order_by('yaratilgan_vaqt')
+        self.assertEqual(expenses.count(), 2)
+        self.assertEqual(expenses[1].miqdor, Decimal("-10000.00"))
+        
+        # Now restore the product
+        product.is_active = True
+        product.save(update_fields=['is_active'])
+        
+        # Restoring should have created a positive expense of 10000.00
+        expenses = Xarajat.objects.filter(biznes=biznes).order_by('yaratilgan_vaqt')
+        self.assertEqual(expenses.count(), 3)
+        self.assertEqual(expenses[2].miqdor, Decimal("10000.00"))
+
+        # Now change the price of the product
+        product.kelish_narxi = Decimal("1500.00")
+        product.save()
+        
+        # All associated expenses should be updated to 5 * 1500 = 7500.00
+        expenses = Xarajat.objects.filter(biznes=biznes).order_by('yaratilgan_vaqt')
+        self.assertEqual(expenses[0].miqdor, Decimal("7500.00"))
+        self.assertEqual(expenses[1].miqdor, Decimal("-7500.00"))
+        self.assertEqual(expenses[2].miqdor, Decimal("7500.00"))
+
 
 class MahsulotAPITestCase(APITestCase):
     def setUp(self):
@@ -1713,7 +1765,7 @@ class YorliqShablonAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
-class WriteOffAPITestCase(APITestCase):
+class WriteOffAPI2TestCase(APITestCase):
     def setUp(self):
         from user.models import Biznes, Xodim, Tarif
         from products.models import Dokon, Mahsulot, WriteOff
@@ -1766,8 +1818,7 @@ class WriteOffAPITestCase(APITestCase):
         self.assertEqual(len(response.data), 0)
 
         # Filter by date (sana)
-        import datetime
-        today_str = datetime.date.today().isoformat()
+        today_str = self.w1.yaratilgan_vaqt.date().isoformat()
         response = self.client.get(self.list_url, {"sana": today_str})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
@@ -1906,6 +1957,46 @@ class TaminotchiAPITestCase(APITestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.tolangan_summa, Decimal("1000.00"))
         self.assertEqual(self.order.nasiya_summa, Decimal("0.00"))
+
+    def test_supplier_pay_robust_parsing(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
+        self.order.rasmiylashtirish()
+        
+        # Test alternate payload key 'tolov' and UZS suffix format
+        pay_url = reverse('suppliers-pay', kwargs={'pk': self.taminotchi.id})
+        payload = {
+            "tolov": "150.00 UZS",
+            "tolov_turi": "UzCard"
+        }
+        response = self.client.post(pay_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tolangan_summa, Decimal("750.00")) # 600 initial + 150
+        
+        # Check that 'UzCard' payment type was correctly saved in payments
+        from orders.models import SupplierOrderPayment
+        payment = SupplierOrderPayment.objects.filter(order=self.order).order_by('-yaratilgan_vaqt').first()
+        self.assertEqual(payment.tolov_turi, 'uzcard')
+
+    def test_supplier_pay_key_per_type(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
+        self.order.rasmiylashtirish()
+        
+        # Test key-per-type payload key "karta" without explicit "tolov_turi"
+        pay_url = reverse('suppliers-pay', kwargs={'pk': self.taminotchi.id})
+        payload = {
+            "karta": "100.00 UZS"
+        }
+        response = self.client.post(pay_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tolangan_summa, Decimal("700.00")) # 600 initial + 100
+        
+        from orders.models import SupplierOrderPayment
+        payment = SupplierOrderPayment.objects.filter(order=self.order).order_by('-yaratilgan_vaqt').first()
+        self.assertEqual(payment.tolov_turi, 'karta')
 
     def test_supplier_dashboard(self):
         self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.t1)
@@ -2525,10 +2616,15 @@ class OmborgaKirimAPITestCase(APITestCase):
         self.assertEqual(res.data['miqdori'], 32)
         self.assertEqual(float(res.data['kelish_summasi']), 423424.0)
 
-        # Check stock created
+        # Check stock created immediately
         from products.models import Mahsulot, DokonQoldiq
         prod = Mahsulot.objects.get(biznes=self.biznes, nomi="Nobis voluptatem arc")
         self.assertEqual(prod.miqdori, 32)
+
+        # Check that a completed SupplierOrder was created
+        from orders.models import SupplierOrder
+        order = SupplierOrder.objects.get(taminotchi=self.taminotchi)
+        self.assertEqual(order.holat, 'qabul_qilingan')
 
         # Check stats endpoint
         res_stats = self.client.get(reverse('kirim-stats'))
@@ -2663,6 +2759,57 @@ class BrandSoftDeleteAPITestCase(APITestCase):
         self.assertEqual(res_invalid.status_code, status.HTTP_400_BAD_REQUEST)
         errs = res_invalid.data.get('errors', res_invalid.data)
         self.assertIn("brend", errs)
+
+
+class CategoryBrandDeduplicationTests(APITestCase):
+    def setUp(self):
+        from user.models import Biznes, Xodim, Tarif
+        from products.models import MahsulotToifasi, MahsulotBrend
+        from rest_framework.authtoken.models import Token
+        from django.contrib.auth.models import User
+
+        self.tarif = Tarif.objects.create(nomi="Pro", dokon_limiti=5, mahsulot_limiti=100, xodim_limiti=5)
+        self.biznes = Biznes.objects.create(nomi="Test Biznes", egasi_ism="Owner", tarif=self.tarif)
+
+        self.u1 = User.objects.create_user(username="test_user_dedup", password="password123")
+        self.x1 = Xodim.objects.create(
+            user=self.u1, ism="Ali", familiya="Valiyev", telefon_raqam="+998901112244", 
+            parol="secret123", jinsi="erkak", biznes=self.biznes, rol="admin"
+        )
+        self.token = Token.objects.create(user=self.u1).key
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token)
+
+    def test_category_deduplication(self):
+        from products.models import Mahsulot, MahsulotToifasi
+
+        # 1. Save product with new category: it should auto-create MahsulotToifasi
+        p1 = Mahsulot.objects.create(
+            biznes=self.biznes,
+            nomi="Cement A",
+            kelish_narxi="1000.00",
+            sotish_narxi="1200.00",
+            toifa="Cement"
+        )
+        self.assertTrue(MahsulotToifasi.objects.filter(biznes=self.biznes, nomi="Cement").exists())
+        self.assertEqual(MahsulotToifasi.objects.filter(biznes=self.biznes, nomi="Cement").count(), 1)
+
+        # 2. Save another product with same category (different casing/spaces): should not duplicate
+        p2 = Mahsulot.objects.create(
+            biznes=self.biznes,
+            nomi="Cement B",
+            kelish_narxi="1000.00",
+            sotish_narxi="1200.00",
+            toifa="  cement  "
+        )
+        self.assertEqual(MahsulotToifasi.objects.filter(biznes=self.biznes, nomi__iexact="cement").count(), 1)
+
+        # 3. Prevent duplicate creation via serializer
+        url = reverse('toifalar-list')
+        payload = {"nomi": "Cement"}
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("allaqachon mavjud", str(res.data))
+
 
 
 

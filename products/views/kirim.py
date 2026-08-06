@@ -28,7 +28,7 @@ class KirimViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Import.objects.filter(import_turi='kirim')
+        qs = Import.objects.filter(import_turi__in=['kirim', 'qoldiq_kirimi']).exclude(holat='xatolik')
         if hasattr(user, 'xodim') and user.xodim.biznes:
             qs = qs.filter(biznes=user.xodim.biznes)
         elif not user.is_superuser:
@@ -52,6 +52,8 @@ class KirimViewSet(viewsets.ModelViewSet):
                 pass
         if not dokon and hasattr(executor_xodim, 'dokon') and executor_xodim.dokon:
             dokon = executor_xodim.dokon
+        if not dokon and biznes:
+            dokon = Dokon.objects.filter(biznes=biznes).first()
 
         try:
             kirim_obj = serializer.save(
@@ -59,6 +61,70 @@ class KirimViewSet(viewsets.ModelViewSet):
                 dokon=dokon,
                 yaratgan_xodim=executor_xodim
             )
+            if kirim_obj.holat == 'kutilmoqda':
+                kirim_obj.confirm_and_execute(executor_xodim=executor_xodim)
+
+            if kirim_obj.holat == 'yakunlangan' and kirim_obj.taminotchi:
+                from orders.models import SupplierOrder
+                from django.utils import timezone
+
+                is_nasiya = (kirim_obj.tolov_turi == 'nasiya')
+                paid_amt = Decimal('0.00') if is_nasiya else kirim_obj.kelish_summasi
+                debt_amt = kirim_obj.kelish_summasi if is_nasiya else Decimal('0.00')
+
+                so, created = SupplierOrder.objects.get_or_create(
+                    biznes=kirim_obj.biznes,
+                    taminotchi=kirim_obj.taminotchi,
+                    dokon=kirim_obj.dokon,
+                    nomi=f"Kirim #{kirim_obj.chek_raqami or kirim_obj.id}",
+                    defaults={
+                        'holat': 'qabul_qilingan',
+                        'qabul_qilish_sanasi': timezone.now().date(),
+                        'yaratgan_xodim': kirim_obj.yaratgan_xodim,
+                        'umumiy_summa': kirim_obj.kelish_summasi,
+                        'sotuv_summasi': kirim_obj.sotish_summasi,
+                        'tolangan_summa': Decimal('0.00'),
+                        'nasiya_summa': debt_amt,
+                    }
+                )
+                
+                if created:
+                    from orders.models import SupplierOrderItem
+                    from products.models import Mahsulot
+                    for item in kirim_obj.elementlar:
+                        shtrix_kod = item.get('shtrix_kod')
+                        nomi = item.get('nomi')
+                        miqdori = int(item.get('miqdori', 1))
+                        kelish_narxi = Decimal(str(item.get('kelish_narxi', 0.0)))
+                        sotish_narxi = Decimal(str(item.get('sotish_narxi', 0.0)))
+                        
+                        product = None
+                        if shtrix_kod:
+                            product = Mahsulot.objects.filter(biznes=kirim_obj.biznes, shtrix_kodlar__kod=shtrix_kod).first()
+                        if not product and nomi:
+                            product = Mahsulot.objects.filter(biznes=kirim_obj.biznes, nomi=nomi).first()
+                            
+                        if product:
+                            ustama = Decimal('0.00')
+                            if kelish_narxi > 0 and sotish_narxi > 0:
+                                ustama = (((sotish_narxi - kelish_narxi) / kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
+                            
+                            SupplierOrderItem.objects.create(
+                                order=so,
+                                mahsulot=product,
+                                miqdori=miqdori,
+                                kelish_narxi=kelish_narxi,
+                                ustama=ustama,
+                                sotish_narxi=sotish_narxi
+                            )
+                    
+                    # Set the actual paid amount after items are created and validated
+                    so.tolangan_summa = paid_amt
+                    so.save()
+
+                if created and is_nasiya and kirim_obj.taminotchi.balans > 0 and so.nasiya_summa > 0:
+                    use_balans = min(kirim_obj.taminotchi.balans, so.nasiya_summa)
+                    so.add_payment(use_balans, 'balans_postavshika', executor_xodim)
         except DjangoValidationError as e:
             if hasattr(e, 'message_dict'):
                 raise DRFValidationError(e.message_dict)
@@ -95,13 +161,44 @@ class KirimViewSet(viewsets.ModelViewSet):
                     nomi=f"Kirim #{kirim_obj.chek_raqami or kirim_obj.id}",
                     holat='qabul_qilingan',
                     qabul_qilish_sanasi=timezone.now().date(),
-                    haqiqiy_qabul_sana=timezone.now(),
                     yaratgan_xodim=kirim_obj.yaratgan_xodim,
-                    qabul_qilgan_xodim=executor_xodim,
                     umumiy_summa=kirim_obj.kelish_summasi,
-                    tolangan_summa=paid_amt,
+                    tolangan_summa=Decimal('0.00'),
                     nasiya_summa=debt_amt
                 )
+
+                from orders.models import SupplierOrderItem
+                from products.models import Mahsulot
+                for item in kirim_obj.elementlar:
+                    shtrix_kod = item.get('shtrix_kod')
+                    nomi = item.get('nomi')
+                    miqdori = int(item.get('miqdori', 1))
+                    kelish_narxi = Decimal(str(item.get('kelish_narxi', 0.0)))
+                    sotish_narxi = Decimal(str(item.get('sotish_narxi', 0.0)))
+                    
+                    product = None
+                    if shtrix_kod:
+                        product = Mahsulot.objects.filter(biznes=kirim_obj.biznes, shtrix_kodlar__kod=shtrix_kod).first()
+                    if not product and nomi:
+                        product = Mahsulot.objects.filter(biznes=kirim_obj.biznes, nomi=nomi).first()
+                        
+                    if product:
+                        ustama = Decimal('0.00')
+                        if kelish_narxi > 0 and sotish_narxi > 0:
+                            ustama = (((sotish_narxi - kelish_narxi) / kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
+                        
+                        SupplierOrderItem.objects.create(
+                            order=so,
+                            mahsulot=product,
+                            miqdori=miqdori,
+                            kelish_narxi=kelish_narxi,
+                            ustama=ustama,
+                            sotish_narxi=sotish_narxi
+                        )
+
+                # Set the actual paid amount after items are created and validated
+                so.tolangan_summa = paid_amt
+                so.save()
 
                 # If debt exists and supplier has advance deposit (balans > 0), auto-apply balance
                 if is_nasiya and kirim_obj.taminotchi.balans > 0 and so.nasiya_summa > 0:
@@ -110,6 +207,12 @@ class KirimViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             raise DRFValidationError({'detail': str(e)})
+
+        try:
+            from user.telegram_bot import notify_import
+            notify_import(kirim_obj)
+        except Exception:
+            pass
 
         return Response({
             'status': "Omborga kirim muvaffaqiyatli yakunlandi.",

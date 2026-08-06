@@ -27,7 +27,7 @@ class SupplierOrderItemSerializer(serializers.ModelSerializer):
     mahsulot_nomi = serializers.ReadOnlyField(source='mahsulot.nomi')
     shtrix_kod = serializers.SerializerMethodField()
     kelish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
-    ustama = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    ustama = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     sotish_narxi = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     ulgurji_narx = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
 
@@ -426,8 +426,7 @@ class SupplierOrderSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
                         sotish_narxi = kelish_narxi
                 if ustama == Decimal('0.00') and sotish_narxi > kelish_narxi:
                     ustama = (((sotish_narxi - kelish_narxi) / kelish_narxi) * Decimal('100.00')).quantize(Decimal('0.01'))
-                if ustama > Decimal('100.00'):
-                    ustama = Decimal('100.00')
+
 
             if ulgurji_narx < kelish_narxi:
                 ulgurji_narx = sotish_narxi

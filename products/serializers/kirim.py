@@ -26,8 +26,9 @@ class KirimSerializer(serializers.ModelSerializer):
     taminotchi_nomi = serializers.SerializerMethodField(read_only=True)
     yaratgan_xodim_nomi = serializers.SerializerMethodField(read_only=True)
     yakunlagan_xodim_nomi = serializers.SerializerMethodField(read_only=True)
-    sana = serializers.DateTimeField(source='yaratilgan_vaqt', read_only=True)
+    sana = serializers.DateTimeField(source='yaratilgan_vaqt', required=False, allow_null=True)
     auto_confirm = serializers.BooleanField(write_only=True, required=False, default=True)
+    nomi = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Import
@@ -71,8 +72,6 @@ class KirimSerializer(serializers.ModelSerializer):
             'yaratgan_xodim_nomi',
             'yakunlagan_xodim',
             'yakunlagan_xodim_nomi',
-            'sana',
-            'yaratilgan_vaqt',
             'yangilangan_vaqt',
         ]
 
@@ -110,6 +109,34 @@ class KirimSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         if isinstance(data, dict):
             data = data.copy()
+            if not data.get('nomi'):
+                from django.utils.timezone import now
+                data['nomi'] = f"Kirim {now().strftime('%Y.%m.%d %H:%M')}"
+
+            # Normalize tolov_turi from various possible request keys
+            keys_to_check = [
+                'tolov_turi', 'tolovTuri', 'payment_type', 'paymentType',
+                'tolov_usuli', 'tolovUsuli', 'payment_method', 'paymentMethod'
+            ]
+            tolov_turi_val = None
+            for k in keys_to_check:
+                if data.get(k) is not None:
+                    tolov_turi_val = data.get(k)
+                    if k != 'tolov_turi':
+                        data.pop(k, None)
+
+            if tolov_turi_val:
+                if isinstance(tolov_turi_val, dict):
+                    tolov_turi_val = tolov_turi_val.get('id') or tolov_turi_val.get('nomi') or tolov_turi_val.get('value')
+                
+                tolov_turi_str = str(tolov_turi_val).lower().strip()
+                if tolov_turi_str in ('naqd pul', 'naqd'):
+                    data['tolov_turi'] = 'naqd'
+                elif tolov_turi_str in ('plastik karta', 'karta', 'click', 'card', 'plastik'):
+                    data['tolov_turi'] = 'karta'
+                elif tolov_turi_str in ('nasiya', 'qarz', 'nasiya / qarz', 'nasiya/qarz', 'qarz/nasiya', 'qarz / nasiya'):
+                    data['tolov_turi'] = 'nasiya'
+
             # Handle taminotchi if string name or dict passed
             taminotchi_val = data.get('taminotchi')
             if isinstance(taminotchi_val, dict):
@@ -155,7 +182,7 @@ class KirimSerializer(serializers.ModelSerializer):
             if miqdori_val <= 0:
                 raise DRFValidationError(f"{index}-qatordagi mahsulot miqdori 0 dan katta bo'lishi shart.")
 
-            kelish_raw = item.get('kelish_narxi') if item.get('kelish_narxi') is not None else item.get('narxi', 0.0)
+            kelish_raw = item.get('kelish_narxi') if item.get('kelish_narxi') is not None else (item.get('kirim_narxi') if item.get('kirim_narxi') is not None else item.get('narxi', 0.0))
             kelish_val = self._parse_number(kelish_raw)
 
             sotish_raw = item.get('sotish_narxi', 0.0)
@@ -180,9 +207,10 @@ class KirimSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         auto_confirm = validated_data.pop('auto_confirm', True)
+        custom_date = validated_data.pop('yaratilgan_vaqt', None)
         elementlar = validated_data.get('elementlar', [])
         
-        total_qty = sum(int(item.get('miqdori', 0)) for item in elementlar)
+        total_qty = int(sum(float(item.get('miqdori', 0)) for item in elementlar) + 0.5)
         total_kelish = sum(Decimal(str(item.get('miqdori', 0))) * Decimal(str(item.get('kelish_narxi', 0.0))) for item in elementlar)
         total_sotish = sum(Decimal(str(item.get('miqdori', 0))) * Decimal(str(item.get('sotish_narxi', 0.0))) for item in elementlar)
 
@@ -195,6 +223,10 @@ class KirimSerializer(serializers.ModelSerializer):
             validated_data['nomi'] = f"Omborga kirim"
 
         kirim_obj = super().create(validated_data)
+
+        if custom_date:
+            Import.objects.filter(pk=kirim_obj.pk).update(yaratilgan_vaqt=custom_date)
+            kirim_obj.yaratilgan_vaqt = custom_date
 
         if auto_confirm and kirim_obj.holat == 'kutilmoqda':
             executor_xodim = validated_data.get('yaratgan_xodim')

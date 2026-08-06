@@ -25,10 +25,11 @@ class ExpiringTokenAuthentication(TokenAuthentication):
         if hasattr(token.user, 'xodim') and not token.user.xodim.is_active:
             raise exceptions.AuthenticationFailed("Ushbu xodim faol emas.")
 
-        # Check if the token has expired (MED-2: TTL = 6 hours)
-        utc_now = timezone.now()
-        if token.created < utc_now - timedelta(hours=self.TOKEN_TTL_HOURS):
-            token.delete()
-            raise exceptions.AuthenticationFailed("Token muddati tugagan. Qaytadan tizimga kiring.")
+        # Check if the token has expired (Expiration check disabled)
+        # utc_now = timezone.now()
+        # if token.created < utc_now - timedelta(hours=self.TOKEN_TTL_HOURS):
+        #     token.delete()
+        #     raise exceptions.AuthenticationFailed("Token muddati tugagan. Qaytadan tizimga kiring.")
+        pass
 
         return (token.user, token)

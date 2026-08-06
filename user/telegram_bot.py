@@ -9,8 +9,23 @@ from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.db import models
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def clean_name(name_str):
+    if not name_str:
+        return ""
+    cleaned = re.sub(r'\b(foydalanuvchi|user)\b', '', name_str, flags=re.IGNORECASE)
+    return ' '.join(cleaned.split())
+
+
+def get_customer_total_debt(mijoz):
+    from user.models import MijozQarzi
+    from django.db.models import Sum
+    from decimal import Decimal
+    return MijozQarzi.objects.filter(mijoz=mijoz).exclude(holat='tolangan').aggregate(total=Sum('qoldiq_summa'))['total'] or Decimal('0.00')
 
 
 def generate_random_password(length=6):
@@ -89,7 +104,7 @@ def send_telegram_message(text: str, chat_id=None, reply_markup=None):
         return False
 
 
-def send_business_telegram_notification(biznes, text: str):
+def send_business_telegram_notification(biznes, text: str, allowed_roles=None):
     """
     Sends a notification to all active Telegram users/sessions linked to the given business.
     Falls back to global TELEGRAM_CHAT_ID if no active linked user is found.
@@ -108,7 +123,10 @@ def send_business_telegram_notification(biznes, text: str):
         xodim__is_active=True,
         xodim__telegram_notifications_enabled=True,
         state='AUTHENTICATED'
-    ).select_related('xodim')
+    )
+    if allowed_roles:
+        active_sessions = active_sessions.filter(xodim__rol__in=allowed_roles)
+    active_sessions = active_sessions.select_related('xodim')
 
     for sess in active_sessions:
         cid = str(sess.chat_id).strip()
@@ -121,6 +139,8 @@ def send_business_telegram_notification(biznes, text: str):
         is_active=True,
         telegram_notifications_enabled=True
     ).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+    if allowed_roles:
+        xodims = xodims.filter(rol__in=allowed_roles)
 
     for x in xodims:
         cid = str(x.telegram_chat_id).strip()
@@ -133,14 +153,17 @@ def send_business_telegram_notification(biznes, text: str):
             send_telegram_message(text, chat_id=cid)
     else:
         # Fallback to default configured chat ID if no user session is found
-        send_telegram_message(text)
+        if not allowed_roles or 'admin' in allowed_roles:
+            send_telegram_message(text)
 
 
 def notify_sale(sale):
     try:
         from sales.models import Sale
 
-        xodim_ism = f"{sale.xodim.ism} {sale.xodim.familiya}".strip() if sale.xodim else "Noma'lum"
+        x_ism = sale.xodim.ism if sale.xodim else "Noma'lum"
+        x_fam = sale.xodim.familiya if sale.xodim and sale.xodim.familiya else ""
+        xodim_ism = clean_name(f"{x_ism} {x_fam}".strip()) if sale.xodim else "Noma'lum"
         dokon_nomi = sale.dokon.nomi if sale.dokon else "Noma'lum"
         mijoz_nomi = f"{sale.mijoz.ism} {sale.mijoz.familiya}".strip() if sale.mijoz else "Anonim Mijoz"
         vaqt_str = sale.yaratilgan_vaqt.strftime("%d.%m.%Y %H:%M") if sale.yaratilgan_vaqt else ""
@@ -166,9 +189,23 @@ def notify_sale(sale):
 
         items_text = "\n".join(items_lines) if items_lines else "<i>Mahsulotlar ko'rsatilmadi</i>"
 
-        naqd = getattr(sale, 'naqd_summa', Decimal('0.00')) or Decimal('0.00')
-        karta = getattr(sale, 'karta_summa', Decimal('0.00')) or Decimal('0.00')
-        nasiya = getattr(sale, 'nasiya_summa', Decimal('0.00')) or Decimal('0.00')
+        naqd = Decimal('0.00')
+        karta = Decimal('0.00')
+        nasiya = Decimal('0.00')
+
+        if sale.tolov_usuli == 'aralash' and sale.eslatma:
+            import re
+            cleaned_eslatma = re.sub(r'\s+', '', sale.eslatma)
+            naqd_match = re.search(r'(?:Naqd|Cash)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            karta_match = re.search(r'(?:Plastikkarta|Plastik|Karta|Card|Uzcard|Humo)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            nasiya_match = re.search(r'(?:Nasiya|Qarz|Credit)\(?(\d+)\)?', cleaned_eslatma, re.IGNORECASE)
+            
+            if naqd_match:
+                naqd = Decimal(naqd_match.group(1))
+            if karta_match:
+                karta = Decimal(karta_match.group(1))
+            if nasiya_match:
+                nasiya = Decimal(nasiya_match.group(1))
 
         if naqd == Decimal('0.00') and karta == Decimal('0.00') and nasiya == Decimal('0.00'):
             if sale.tolov_usuli == 'naqd':
@@ -217,6 +254,48 @@ def notify_sale(sale):
             msg_parts.append(f"   └ {line}")
 
         send_business_telegram_notification(sale.biznes, "\n".join(msg_parts))
+
+        # Notify the customer if linked to Telegram
+        if sale.mijoz and sale.mijoz.telegram_chat_id and sale.mijoz.telegram_notifications_enabled:
+            from user.models import MijozQarzi
+            from django.db.models import Sum
+            
+            total_qarz = MijozQarzi.objects.filter(mijoz=sale.mijoz).exclude(holat='tolangan').aggregate(total=Sum('qoldiq_summa'))['total'] or Decimal('0.00')
+            b_nomi = sale.biznes.nomi if sale.biznes else "Do'kon"
+            
+            cust_items = []
+            for item_idx, item in enumerate(sale.elementlar.select_related('mahsulot', 'mahsulot__olchov_birligi').all(), 1):
+                m_nomi = item.mahsulot.nomi if item.mahsulot else "Mahsulot"
+                unit = item.mahsulot.olchov_birligi.nomi if (item.mahsulot and item.mahsulot.olchov_birligi) else "dona"
+                cust_items.append(f"   {item_idx}. {m_nomi} ({item.miqdori} {unit}) - <code>{item.jami_summa:,.0f}</code> so'm")
+            
+            cust_items_text = "\n".join(cust_items) if cust_items else "Mahsulotlar ko'rsatilmadi"
+            
+            cust_msg = (
+                f"🛍 <b>Yangi xarid muvaffaqiyatli amalga oshirildi!</b>\n\n"
+                f"🏪 <b>Do'kon:</b> {b_nomi}\n"
+                f"📅 <b>Sana:</b> {vaqt_str}\n\n"
+                f"📦 <b>Sotib olingan mahsulotlar:</b>\n{cust_items_text}\n\n"
+                f"💰 <b>Jami summa:</b> <code>{sale.yakuniy_summa:,.0f}</code> so'm\n"
+            )
+            if tolov_turlari_lines:
+                cust_msg += "💳 <b>To'lov turlari va summalari:</b>\n"
+                for line in tolov_turlari_lines:
+                    cust_msg += f"   └ {line}\n"
+                cust_msg += "\n"
+
+            if total_qarz > 0:
+                cust_msg += f"💳 <b>Hisobdagi qarz qoldig'ingiz:</b> <code>{total_qarz:,.0f}</code> so'm\n\n"
+            else:
+                cust_msg += f"🎉 <b>Hisobingiz to'liq yopildi.</b> Qarz qoldig'ingiz yo'q! 😊\n\n"
+                
+            cust_msg += "Xaridingiz uchun tashakkur! Biz sizni qadrlaymiz! 😊"
+            
+            try:
+                send_telegram_message(cust_msg, chat_id=str(sale.mijoz.telegram_chat_id).strip())
+            except Exception as ex:
+                logger.error(f"Failed to send sale notification to customer: {ex}")
+
     except Exception as e:
         logger.error(f"Failed to build sale notification: {e}")
 
@@ -240,7 +319,9 @@ def notify_transfer(transfer):
 
 def notify_write_off(write_off):
     try:
-        xodim = write_off.yaratgan_xodim.ism if getattr(write_off, 'yaratgan_xodim', None) else "Noma'lum"
+        x_ism = write_off.yaratgan_xodim.ism if getattr(write_off, 'yaratgan_xodim', None) else "Noma'lum"
+        x_fam = write_off.yaratgan_xodim.familiya if getattr(write_off, 'yaratgan_xodim', None) and write_off.yaratgan_xodim.familiya else ""
+        xodim = clean_name(f"{x_ism} {x_fam}".strip()) if getattr(write_off, 'yaratgan_xodim', None) else "Noma'lum"
         biznes = getattr(write_off, 'biznes', None) or (write_off.dokon.biznes if getattr(write_off, 'dokon', None) else None)
         msg = (
             f"<b>⚠️ Hisobdan Chiqarish #{write_off.id}:</b>\n"
@@ -248,21 +329,47 @@ def notify_write_off(write_off):
             f"📝 Sabab: {write_off.sababi}\n"
             f"💰 Jami Summa: <code>{write_off.sotish_summasi:,.2f}</code> so'm\n"
         )
-        send_business_telegram_notification(biznes, msg)
+        send_business_telegram_notification(biznes, msg, allowed_roles=['admin'])
     except Exception as e:
         logger.error(f"Failed to build write_off notification: {e}")
 
 
 def notify_import(import_obj):
     try:
-        biznes = getattr(import_obj, 'biznes', None)
+        x_ism = import_obj.yaratgan_xodim.ism if import_obj.yaratgan_xodim else "Noma'lum"
+        x_fam = import_obj.yaratgan_xodim.familiya if import_obj.yaratgan_xodim and import_obj.yaratgan_xodim.familiya else ""
+        xodim = clean_name(f"{x_ism} {x_fam}".strip()) if import_obj.yaratgan_xodim else "Noma'lum"
+        dokon = import_obj.dokon.nomi if import_obj.dokon else "Noma'lum"
+        taminotchi = import_obj.taminotchi.nomi if import_obj.taminotchi else "Noma'lum"
+        
+        items_lines = []
+        elementlar = import_obj.elementlar or []
+        for i, item in enumerate(elementlar[:10], 1):
+            nomi = item.get('nomi') or item.get('mahsulot_nomi') or "Mahsulot"
+            qty = item.get('miqdori') or item.get('quantity') or 0
+            price = item.get('kelish_narxi') or item.get('price') or 0
+            try:
+                price_val = float(price)
+            except Exception:
+                price_val = 0.0
+            items_lines.append(f"   {i}. {nomi} - <code>{qty}</code> dona x <code>{price_val:,.0f}</code> so'm")
+        if len(elementlar) > 10:
+            items_lines.append(f"   ... va yana {len(elementlar) - 10} ta mahsulot")
+        items_text = "\n".join(items_lines) if items_lines else "Mahsulotlar mavjud emas"
+
+        turi_disp = import_obj.get_import_turi_display() if hasattr(import_obj, 'get_import_turi_display') else import_obj.import_turi
+        tolov_disp = import_obj.get_tolov_turi_display() if hasattr(import_obj, 'get_tolov_turi_display') else import_obj.tolov_turi
+
         msg = (
-            f"<b>📥 Yangi Kirim (Import) #{import_obj.id}:</b>\n"
-            f"📦 Mahsulot: {import_obj.mahsulot_nomi}\n"
-            f"🔢 Miqdori: {import_obj.miqdori}\n"
-            f"💵 Kelish Narxi: <code>{import_obj.kelish_narxi:,.2f}</code> so'm\n"
+            f"<b>📥 YANGI KIRIM ({turi_disp.upper()}) #{import_obj.id}</b>\n"
+            f"🏪 <b>Do'kon:</b> {dokon}\n"
+            f"👤 <b>Xodim:</b> {xodim}\n"
+            f"🤝 <b>Yetkazib beruvchi:</b> {taminotchi}\n"
+            f"💵 <b>To'lov turi:</b> {tolov_disp}\n"
+            f"\n📦 <b>Mahsulotlar:</b>\n{items_text}\n\n"
+            f"💰 <b>Jami kelish summasi:</b> <code>{import_obj.kelish_summasi:,.0f}</code> so'm\n"
         )
-        send_business_telegram_notification(biznes, msg)
+        send_business_telegram_notification(import_obj.biznes, msg)
     except Exception as e:
         logger.error(f"Failed to build import notification: {e}")
 
@@ -277,12 +384,46 @@ def get_phone_keyboard():
     }
 
 
-def get_main_keyboard():
+def get_main_keyboard(xodim=None):
+    buttons = [
+        [{"text": "📊 Bugungi hisobot"}, {"text": "🛒 So'nggi sotuvlar"}],
+        [{"text": "⚠️ Hisobdan chiqarishlar"}, {"text": "📦 Kam qolgan mahsulotlar"}],
+        [{"text": "⚙️ Sozlamalar"}]
+    ]
+    if xodim and xodim.rol == 'admin':
+        buttons.insert(2, [{"text": "📢 Xabar yuborish"}])
+    return {
+        "keyboard": buttons,
+        "resize_keyboard": True
+    }
+
+
+def get_broadcast_keyboard():
     return {
         "keyboard": [
-            [{"text": "📊 Bugungi hisobot"}, {"text": "🛒 So'nggi sotuvlar"}],
-            [{"text": "⚠️ Hisobdan chiqarishlar"}, {"text": "📦 Kam qolgan mahsulotlar"}],
-            [{"text": "⚙️ Sozlamalar"}]
+            [{"text": "👥 Qarz eslatmasi (Barchaga)"}],
+            [{"text": "👤 Qarz eslatmasi (Tanlangan mijozga)"}],
+            [{"text": "📝 Oddiy reklama yuborish"}],
+            [{"text": "🔙 Asosiy menyu"}]
+        ],
+        "resize_keyboard": True
+    }
+
+
+def get_confirm_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "✅ Tasdiqlash"}, {"text": "❌ Bekor qilish"}]
+        ],
+        "resize_keyboard": True
+    }
+
+
+def get_ad_recipient_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "👥 Barcha mijozlarga"}, {"text": "👥 Faqat qarzdorlarga"}],
+            [{"text": "❌ Bekor qilish"}]
         ],
         "resize_keyboard": True
     }
@@ -344,7 +485,7 @@ def get_recent_sales_for_biznes(biznes, limit=5):
     lines = [f"<b>🛒 SO'NGGI SOTUVLAR ({biznes.nomi}):</b>\n"]
     for s in sales:
         v_str = s.yaratilgan_vaqt.strftime("%d.%m %H:%M") if s.yaratilgan_vaqt else ""
-        x_ism = s.xodim.ism if s.xodim else "Noma'lum"
+        x_ism = clean_name(s.xodim.ism) if s.xodim else "Noma'lum"
         lines.append(
             f"🔹 <b>#{s.kod} ({v_str})</b>\n"
             f"   👤 Xodim: {x_ism} | 💳 To'lov: {s.get_tolov_usuli_display()}\n"
@@ -421,18 +562,41 @@ def process_telegram_update(update: dict):
             xodim = session.xodim
             b_nomi = xodim.biznes.nomi if xodim.biznes else 'Mavjud emas'
             msg = (
-                f"👋 Salom, <b>{xodim.ism} {xodim.familiya}</b>!\n"
+                f"👋 Salom, <b>{clean_name(xodim.ism + ' ' + (xodim.familiya or ''))}</b>!\n"
                 f"🏢 Biznes: <b>{b_nomi}</b>\n\n"
                 f"Tizimga ulangan ekansiz. Kerakli bo'limni tanlang:"
             )
-            send_telegram_message(msg, chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message(msg, chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
+        elif session.state == 'AUTHENTICATED_MIJOZ' and session.mijoz:
+            from django.db.models import Sum
+            from user.models import MijozQarzi
+            from decimal import Decimal
+            mijoz = session.mijoz
+            qarz = MijozQarzi.objects.filter(mijoz=mijoz).exclude(holat='tolangan').aggregate(total=Sum('qoldiq_summa'))['total'] or Decimal('0.00')
+            b_nomi = mijoz.biznes.nomi if mijoz.biznes else 'Mavjud emas'
+            
+            if qarz > 0:
+                msg = (
+                    f"👋 Salom, hurmatli <b>{mijoz.ism} {mijoz.familiya or ''}</b>!\n"
+                    f"🏢 Do'kon: <b>{b_nomi}</b>\n\n"
+                    f"💳 <b>Hisob holati:</b> Joriy qarz qoldig'ingiz <code>{qarz:,.0f}</code> so'm.\n\n"
+                    f"🔔 Botimiz orqali har dushanba kuni hisobingiz holati haqida ma'lumot berib boriladi. Bizni tanlaganingiz uchun tashakkur!"
+                )
+            else:
+                msg = (
+                    f"👋 Salom, hurmatli <b>{mijoz.ism} {mijoz.familiya or ''}</b>!\n"
+                    f"🏢 Do'kon: <b>{b_nomi}</b>\n\n"
+                    f"🎉 <b>Sizning qarz qoldig'ingiz yo'q!</b> Do'konimizdan xarid qilganingiz uchun tashakkur! 😊"
+                )
+            send_telegram_message(msg, chat_id=chat_id)
         else:
             session.state = 'AWAITING_PHONE'
             session.xodim = None
+            session.mijoz = None
             session.save()
             msg = (
                 "👋 Assalomu alaykum! <b>TemirDo'kon</b> botiga xush kelibsiz.\n\n"
-                "Biznesingiz bildirishnomalarini olish va tizimni boshqarish uchun 📱 <b>Telefon raqamingizni yuboring</b>."
+                "Tizimdan foydalanish uchun 📱 <b>Telefon raqamingizni yuboring</b>."
             )
             send_telegram_message(msg, chat_id=chat_id, reply_markup=get_phone_keyboard())
         return True
@@ -450,26 +614,69 @@ def process_telegram_update(update: dict):
                 found_xodim = x
                 break
 
-        if not found_xodim:
+        if found_xodim:
+            session.temp_phone = norm_phone
+            session.xodim = found_xodim
+            session.state = 'AWAITING_PASSWORD'
+            session.save()
+
+            b_nomi = found_xodim.biznes.nomi if found_xodim.biznes else 'Mavjud emas'
             msg = (
-                f"❌ Telefon raqam (<code>{phone_raw}</code>) bo'yicha tizimda foydalanuvchi topilmadi.\n\n"
-                "Iltimos, dasturga kirish uchun ro'yxatdan o'tgan telefon raqamingizni yuboring."
+                f"👤 Foydalanuvchi topildi: <b>{found_xodim.ism} {found_xodim.familiya}</b>\n"
+                f"🏢 Biznes: <b>{b_nomi}</b>\n\n"
+                "🔑 Davom etish uchun <b>parolingizni kiriting</b>:"
             )
-            send_telegram_message(msg, chat_id=chat_id, reply_markup=get_phone_keyboard())
+            send_telegram_message(msg, chat_id=chat_id, reply_markup={"remove_keyboard": True})
             return True
 
-        session.temp_phone = norm_phone
-        session.xodim = found_xodim
-        session.state = 'AWAITING_PASSWORD'
-        session.save()
+        # Match Mijoz by normalized phone
+        from user.models import Mijoz
+        all_mijozlar = Mijoz.objects.all()
+        found_mijoz = None
+        for m in all_mijozlar:
+            if m.telefon_raqam_1 and normalize_phone(m.telefon_raqam_1) == norm_phone:
+                found_mijoz = m
+                break
+            if m.telefon_raqam_2 and normalize_phone(m.telefon_raqam_2) == norm_phone:
+                found_mijoz = m
+                break
 
-        b_nomi = found_xodim.biznes.nomi if found_xodim.biznes else 'Mavjud emas'
+        if found_mijoz:
+            found_mijoz.telegram_chat_id = str(chat_id)
+            found_mijoz.save()
+
+            session.mijoz = found_mijoz
+            session.state = 'AUTHENTICATED_MIJOZ'
+            session.save()
+
+            from django.db.models import Sum
+            from user.models import MijozQarzi
+            from decimal import Decimal
+            qarz = MijozQarzi.objects.filter(mijoz=found_mijoz).exclude(holat='tolangan').aggregate(total=Sum('qoldiq_summa'))['total'] or Decimal('0.00')
+            b_nomi = found_mijoz.biznes.nomi if found_mijoz.biznes else 'Mavjud emas'
+            if qarz > 0:
+                msg = (
+                    f"✅ <b>Muvaffaqiyatli tizimga ulandingiz!</b>\n\n"
+                    f"👤 Mijoz: <b>{found_mijoz.ism} {found_mijoz.familiya or ''}</b>\n"
+                    f"🏢 Do'kon: <b>{b_nomi}</b>\n\n"
+                    f"💳 <b>Hisob holati:</b> Joriy qarz qoldig'ingiz <code>{qarz:,.0f}</code> so'm.\n\n"
+                    f"🔔 Botimiz orqali har dushanba kuni hisobingiz holati haqida ma'lumot berib boriladi."
+                )
+            else:
+                msg = (
+                    f"✅ <b>Muvaffaqiyatli tizimga ulandingiz!</b>\n\n"
+                    f"👤 Mijoz: <b>{found_mijoz.ism} {found_mijoz.familiya or ''}</b>\n"
+                    f"🏢 Do'kon: <b>{b_nomi}</b>\n\n"
+                    f"🎉 <b>Qarz qoldig'ingiz yo'q!</b> Do'konimizdan xarid qilganingiz uchun tashakkur! 😊"
+                )
+            send_telegram_message(msg, chat_id=chat_id, reply_markup={"remove_keyboard": True})
+            return True
+
         msg = (
-            f"👤 Foydalanuvchi topildi: <b>{found_xodim.ism} {found_xodim.familiya}</b>\n"
-            f"🏢 Biznes: <b>{b_nomi}</b>\n\n"
-            "🔑 Davom etish uchun <b>parolingizni kiriting</b>:"
+            f"❌ Telefon raqam (<code>{phone_raw}</code>) bo'yicha tizimda foydalanuvchi yoki mijoz topilmadi.\n\n"
+            "Iltimos, tizimda ro'yxatdan o'tgan telefon raqamingizni yuboring."
         )
-        send_telegram_message(msg, chat_id=chat_id, reply_markup={"remove_keyboard": True})
+        send_telegram_message(msg, chat_id=chat_id, reply_markup=get_phone_keyboard())
         return True
 
     # State: AWAITING_PASSWORD
@@ -492,13 +699,193 @@ def process_telegram_update(update: dict):
             b_nomi = xodim.biznes.nomi if xodim.biznes else 'Mavjud emas'
             msg = (
                 f"✅ <b>Muvaffaqiyatli tizimga ulandingiz!</b>\n\n"
-                f"👤 Xodim: <b>{xodim.ism} {xodim.familiya}</b>\n"
+                f"👤 Xodim: <b>{clean_name(xodim.ism + ' ' + (xodim.familiya or ''))}</b>\n"
                 f"🏢 Biznes: <b>{b_nomi}</b>\n\n"
                 f"🔔 Endi ushbu biznesga oid sotuvlar va bildirishnomalar ushbu chatga yuboriladi."
             )
-            send_telegram_message(msg, chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message(msg, chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
         else:
             send_telegram_message("❌ <b>Parol noto'g'ri.</b> Qayta kiriting:", chat_id=chat_id)
+        return True
+
+    # State: AWAITING_BROADCAST_TYPE
+    if session.state == 'AWAITING_BROADCAST_TYPE' and session.xodim and session.xodim.rol == 'admin':
+        if text == "🔙 Asosiy menyu":
+            session.state = 'AUTHENTICATED'
+            session.save()
+            send_telegram_message("📱 Asosiy menyu:", chat_id=chat_id, reply_markup=get_main_keyboard(session.xodim))
+            return True
+        elif text == "👥 Qarz eslatmasi (Barchaga)":
+            session.state = 'AWAITING_CONFIRM_ALL_DEBTORS'
+            session.save()
+            send_telegram_message("❓ Haqiqatan ham barcha qarzi bor mijozlarga Telegram orqali eslatma yuborilsinmi?", chat_id=chat_id, reply_markup=get_confirm_keyboard())
+            return True
+        elif text == "👤 Qarz eslatmasi (Tanlangan mijozga)":
+            from user.models import Mijoz
+            mijozlar = Mijoz.objects.filter(biznes=session.xodim.biznes).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+            debtors = []
+            for m in mijozlar:
+                qarz = get_customer_total_debt(m)
+                if qarz > 0:
+                    debtors.append(m)
+            
+            if not debtors:
+                send_telegram_message("ℹ️ Telegramga ulangan qarzdor mijozlar mavjud emas.", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
+                return True
+            
+            keyboard_buttons = []
+            for d in debtors[:15]:
+                q = get_customer_total_debt(d)
+                keyboard_buttons.append([{"text": f"Mijoz: {d.ism} ({q:,.0f} UZS)"}])
+            keyboard_buttons.append([{"text": "❌ Bekor qilish"}])
+            
+            session.state = 'AWAITING_DEBTOR_SELECTION'
+            session.save()
+            send_telegram_message("👤 Eslatma yubormoqchi bo'lgan mijozingizni tanlang:", chat_id=chat_id, reply_markup={"keyboard": keyboard_buttons, "resize_keyboard": True})
+            return True
+        elif text == "📝 Oddiy reklama yuborish":
+            session.state = 'AWAITING_AD_TEXT'
+            session.save()
+            send_telegram_message("📝 Reklama matnini kiriting:", chat_id=chat_id, reply_markup={"keyboard": [[{"text": "❌ Bekor qilish"}]], "resize_keyboard": True})
+            return True
+
+    # State: AWAITING_CONFIRM_ALL_DEBTORS
+    if session.state == 'AWAITING_CONFIRM_ALL_DEBTORS' and session.xodim and session.xodim.rol == 'admin':
+        if text == "✅ Tasdiqlash":
+            from user.models import MijozQarzi
+            from django.db.models import Sum
+            from decimal import Decimal
+            
+            unpaid_debts = MijozQarzi.objects.exclude(holat='tolangan').filter(
+                mijoz__biznes=session.xodim.biznes,
+                mijoz__telegram_chat_id__isnull=False
+            ).exclude(mijoz__telegram_chat_id="")
+            
+            customers_debts = {}
+            for dq in unpaid_debts:
+                mijoz = dq.mijoz
+                if mijoz.telegram_notifications_enabled:
+                    customers_debts[mijoz] = customers_debts.get(mijoz, Decimal('0.00')) + dq.qoldiq_summa
+            
+            sent_count = 0
+            b_nomi = session.xodim.biznes.nomi if session.xodim.biznes else "Do'kon"
+            for mijoz, total_qarz in customers_debts.items():
+                if total_qarz > 0:
+                    msg = (
+                        f"Assalomu alaykum, <b>{mijoz.ism} {mijoz.familiya or ''}</b>!\n\n"
+                        f"⚠️ Sizning <b>{b_nomi}</b> do'konimizdan <code>{total_qarz:,.0f}</code> so'm qarz qoldig'ingiz bor.\n"
+                        f"Iltimos, o'z vaqtida to'lov qilishni unutmang. Rahmat!"
+                    )
+                    try:
+                        send_telegram_message(msg, chat_id=str(mijoz.telegram_chat_id).strip())
+                        sent_count += 1
+                    except Exception:
+                        pass
+            
+            session.state = 'AUTHENTICATED'
+            session.save()
+            send_telegram_message(f"✅ Barcha qarzdorlarga eslatma yuborildi. Muvaffaqiyatli jo'natildi: {sent_count} ta.", chat_id=chat_id, reply_markup=get_main_keyboard(session.xodim))
+            return True
+        else:
+            session.state = 'AWAITING_BROADCAST_TYPE'
+            session.save()
+            send_telegram_message("❌ Bekor qilindi.", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
+            return True
+
+    # State: AWAITING_DEBTOR_SELECTION
+    if session.state == 'AWAITING_DEBTOR_SELECTION' and session.xodim and session.xodim.rol == 'admin':
+        if text == "❌ Bekor qilish" or text.startswith("❌"):
+            session.state = 'AWAITING_BROADCAST_TYPE'
+            session.save()
+            send_telegram_message("❌ Bekor qilindi.", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
+            return True
+        
+        if text.startswith("Mijoz:"):
+            try:
+                name_part = text.split("Mijoz:")[1].split("(")[0].strip()
+                from user.models import Mijoz
+                mijoz = Mijoz.objects.filter(biznes=session.xodim.biznes, ism=name_part).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="").first()
+                if mijoz:
+                    q = get_customer_total_debt(mijoz)
+                    b_nomi = session.xodim.biznes.nomi if session.xodim.biznes else "Do'kon"
+                    msg = (
+                        f"Assalomu alaykum, <b>{mijoz.ism} {mijoz.familiya or ''}</b>!\n\n"
+                        f"⚠️ Sizning <b>{b_nomi}</b> do'konimizdan <code>{q:,.0f}</code> so'm qarz qoldig'ingiz bor.\n"
+                        f"Iltimos, o'z vaqtida to'lov qilishni unutmang. Rahmat!"
+                    )
+                    try:
+                        send_telegram_message(msg, chat_id=str(mijoz.telegram_chat_id).strip())
+                        send_telegram_message(f"✅ Mijoz {mijoz.ism}ga eslatma yuborildi.", chat_id=chat_id, reply_markup=get_main_keyboard(session.xodim))
+                    except Exception as ex:
+                        send_telegram_message(f"❌ Xabarni yuborishda xatolik yuz berdi: {ex}", chat_id=chat_id, reply_markup=get_main_keyboard(session.xodim))
+                    
+                    session.state = 'AUTHENTICATED'
+                    session.save()
+                    return True
+            except Exception:
+                pass
+        
+        send_telegram_message("❌ Noto'g'ri tanlov. Qaytadan tanlang:", chat_id=chat_id)
+        return True
+
+    # State: AWAITING_AD_TEXT
+    if session.state == 'AWAITING_AD_TEXT' and session.xodim and session.xodim.rol == 'admin':
+        if text == "❌ Bekor qilish":
+            session.state = 'AWAITING_BROADCAST_TYPE'
+            session.save()
+            send_telegram_message("❌ Bekor qilindi.", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
+            return True
+        
+        if not text:
+            send_telegram_message("❌ Iltimos, reklama matnini matn ko'rinishida yuboring:", chat_id=chat_id)
+            return True
+        
+        session.temp_phone = text
+        session.state = 'AWAITING_AD_RECIPIENT_TYPE'
+        session.save()
+        send_telegram_message("👥 Reklamani kimlarga yubormoqchisiz?", chat_id=chat_id, reply_markup=get_ad_recipient_keyboard())
+        return True
+
+    # State: AWAITING_AD_RECIPIENT_TYPE
+    if session.state == 'AWAITING_AD_RECIPIENT_TYPE' and session.xodim and session.xodim.rol == 'admin':
+        if text == "❌ Bekor qilish":
+            session.state = 'AWAITING_BROADCAST_TYPE'
+            session.save()
+            send_telegram_message("❌ Bekor qilindi.", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
+            return True
+        
+        ad_text = session.temp_phone
+        from user.models import Mijoz
+        
+        if text == "👥 Barcha mijozlarga":
+            mijozlar = Mijoz.objects.filter(biznes=session.xodim.biznes).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+        elif text == "👥 Faqat qarzdorlarga":
+            all_mijozlar = Mijoz.objects.filter(biznes=session.xodim.biznes).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id="")
+            mijozlar = []
+            for m in all_mijozlar:
+                if get_customer_total_debt(m) > 0:
+                    mijozlar.append(m)
+        else:
+            send_telegram_message("❌ Noto'g'ri tanlov. Qaytadan tanlang:", chat_id=chat_id)
+            return True
+            
+        if not mijozlar:
+            send_telegram_message("ℹ️ Ko'rsatilgan guruhda Telegramga ulangan mijozlar topilmadi.", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
+            session.state = 'AWAITING_BROADCAST_TYPE'
+            session.save()
+            return True
+            
+        sent_count = 0
+        for m in mijozlar:
+            try:
+                send_telegram_message(ad_text, chat_id=str(m.telegram_chat_id).strip())
+                sent_count += 1
+            except Exception:
+                pass
+                
+        session.state = 'AUTHENTICATED'
+        session.save()
+        send_telegram_message(f"✅ Reklama yuborildi. Muvaffaqiyatli jo'natildi: {sent_count} ta.", chat_id=chat_id, reply_markup=get_main_keyboard(session.xodim))
         return True
 
     # State: AUTHENTICATED commands
@@ -508,20 +895,20 @@ def process_telegram_update(update: dict):
 
         if text == "📊 Bugungi hisobot":
             res = get_today_summary_for_biznes(biznes)
-            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
         elif text == "🛒 So'nggi sotuvlar":
             res = get_recent_sales_for_biznes(biznes)
-            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
         elif text == "⚠️ Hisobdan chiqarishlar":
             res = get_recent_write_offs_for_biznes(biznes)
-            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
         elif text == "📦 Kam qolgan mahsulotlar":
             res = get_low_stock_for_biznes(biznes)
-            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message(res, chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
         elif text == "⚙️ Sozlamalar":
             msg = (
                 f"<b>⚙️ SOZLAMALAR</b>\n\n"
-                f"👤 Xodim: {xodim.ism} {xodim.familiya}\n"
+                f"👤 Xodim: {clean_name(xodim.ism + ' ' + (xodim.familiya or ''))}\n"
                 f"📞 Telefon: {xodim.telefon_raqam}\n"
                 f"🏢 Biznes: {biznes.nomi if biznes else 'Mavjud emas'}\n"
                 f"🔔 Bildirishnomalar: {'<b>Yoqilgan 🟢</b>' if xodim.telegram_notifications_enabled else '<b>O\'chirilgan 🔴</b>'}"
@@ -540,9 +927,13 @@ def process_telegram_update(update: dict):
             session.save()
             send_telegram_message("🚪 Tizimdan muvaffaqiyatli chiqdingiz. Qayta ulanish uchun telefon raqam yuboring.", chat_id=chat_id, reply_markup=get_phone_keyboard())
         elif text == "🔙 Asosiy menyu":
-            send_telegram_message("📱 Asosiy menyu:", chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message("📱 Asosiy menyu:", chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
+        elif text == "📢 Xabar yuborish" and xodim.rol == 'admin':
+            session.state = 'AWAITING_BROADCAST_TYPE'
+            session.save()
+            send_telegram_message("📢 Xabar yuborish bo'limi. Kerakli turni tanlang:", chat_id=chat_id, reply_markup=get_broadcast_keyboard())
         else:
-            send_telegram_message("ℹ️ Kerakli bo'limni pastdagi tugmalar orqali tanlang:", chat_id=chat_id, reply_markup=get_main_keyboard())
+            send_telegram_message("ℹ️ Kerakli bo'limni pastdagi tugmalar orqali tanlang:", chat_id=chat_id, reply_markup=get_main_keyboard(xodim))
         return True
 
     # Default fallback
@@ -596,3 +987,39 @@ def send_daily_report(target_date=None, biznes=None):
             send_business_telegram_notification(biz, msg)
     except Exception as e:
         logger.error(f"Failed to send daily report: {e}")
+
+
+def send_weekly_debt_reminders():
+    """
+    Sends automated debt reminders to all customers having positive debt balance
+    and a registered Telegram chat ID.
+    """
+    try:
+        from user.models import MijozQarzi
+        from django.db.models import Sum
+        from decimal import Decimal
+
+        unpaid_debts = MijozQarzi.objects.exclude(holat='tolangan').filter(
+            mijoz__telegram_chat_id__isnull=False
+        ).exclude(mijoz__telegram_chat_id="")
+
+        customers_debts = {}
+        for dq in unpaid_debts:
+            mijoz = dq.mijoz
+            if mijoz.telegram_notifications_enabled:
+                customers_debts[mijoz] = customers_debts.get(mijoz, Decimal('0.00')) + dq.qoldiq_summa
+
+        for mijoz, total_qarz in customers_debts.items():
+            if total_qarz > 0:
+                b_nomi = mijoz.biznes.nomi if mijoz.biznes else "Do'kon"
+                msg = (
+                    f"Assalomu alaykum, <b>{mijoz.ism} {mijoz.familiya or ''}</b>!\n\n"
+                    f"⚠️ Sizning <b>{b_nomi}</b> do'konimizdan <code>{total_qarz:,.0f}</code> so'm qarz qoldig'ingiz bor.\n"
+                    f"Iltimos, o'z vaqtida to'lov qilishni unutmang. Rahmat!"
+                )
+                try:
+                    send_telegram_message(msg, chat_id=str(mijoz.telegram_chat_id).strip())
+                except Exception as ex:
+                    logger.error(f"Failed to send weekly debt reminder to customer {mijoz.id}: {ex}")
+    except Exception as e:
+        logger.error(f"Failed to process weekly debt reminders: {e}")

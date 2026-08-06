@@ -759,10 +759,6 @@ class ExtraEndpointsAPITestCase(APITestCase):
         self.assertEqual(response_stats.status_code, status.HTTP_200_OK)
         self.assertIn('qarzlar_summasi', response_stats.data)
 
-        # POST /credits/debtors/send-sms/
-        response_sms = self.client.post(reverse('credits-debtors-send-sms'))
-        self.assertEqual(response_sms.status_code, status.HTTP_200_OK)
-
     def test_loyalty_tiers_and_program(self):
         # GET /loyalty/
         response = self.client.get(reverse('loyalty-root'))

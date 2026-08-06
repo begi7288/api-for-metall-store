@@ -21,9 +21,19 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     jami_qarz = serializers.SerializerMethodField()
     jamiQarz = serializers.SerializerMethodField()
     qarz_summasi = serializers.SerializerMethodField()
+    qarzSummasi = serializers.SerializerMethodField()
+    qarz = serializers.SerializerMethodField()
+    nasiya_summasi = serializers.SerializerMethodField()
+    nasiyaSummasi = serializers.SerializerMethodField()
+    total_debt = serializers.SerializerMethodField()
+    totalDebt = serializers.SerializerMethodField()
+
     buyurtmalar_summasi = serializers.SerializerMethodField()
+    buyurtmalarSummasi = serializers.SerializerMethodField()
     tolovlar_summasi = serializers.SerializerMethodField()
+    tolovlarSummasi = serializers.SerializerMethodField()
     tovarlar_soni = serializers.SerializerMethodField()
+    tovarlarSoni = serializers.SerializerMethodField()
 
     hujjat = serializers.FileField(source='fayl', required=False, allow_null=True)
     hujjatlar = serializers.FileField(source='fayl', required=False, allow_null=True)
@@ -36,11 +46,12 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
     class Meta:
         model = Taminotchi
         fields = [
-            'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telRaqami', 'telefon_raqam', 'telefonlar', 'standart_ustama',
+            'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telRaqami', 'telefon_raqam', 'telefonlar', 
             'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'boshliq_nomi', 'boshliqNomi', 'director', 'director_name', 'directorName', 'yuridik_nomi',
             'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
             'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'fayl', 'hujjat', 'hujjatlar', 'balans', 'is_active',
-            'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'buyurtmalar_summasi', 'tolovlar_summasi', 'tovarlar_soni',
+            'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'qarzSummasi', 'qarz', 'nasiya_summasi', 'nasiyaSummasi', 'total_debt', 'totalDebt',
+            'buyurtmalar_summasi', 'buyurtmalarSummasi', 'tolovlar_summasi', 'tolovlarSummasi', 'tovarlar_soni', 'tovarlarSoni',
             'dastlabki_qarz', 'dastlabkiQarz', 'boshlangich_qarz', 'boshlangichQarz', 'yaratilgan_vaqt', 'yangilangan_vaqt'
         ]
         read_only_fields = ['biznes', 'balans', 'yaratilgan_vaqt', 'yangilangan_vaqt']
@@ -49,11 +60,11 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         from django.db.models import F
         last_unpaid = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').filter(umumiy_summa__gt=F('tolangan_summa')).order_by('-yaratilgan_vaqt').first()
         if last_unpaid:
-            return max(Decimal('0.00'), last_unpaid.umumiy_summa - last_unpaid.tolangan_summa)
+            return str(max(Decimal('0.00'), last_unpaid.umumiy_summa - last_unpaid.tolangan_summa))
         last_order = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').order_by('-yaratilgan_vaqt').first()
         if last_order:
-            return max(Decimal('0.00'), last_order.umumiy_summa - last_order.tolangan_summa)
-        return Decimal('0.00')
+            return str(max(Decimal('0.00'), last_order.umumiy_summa - last_order.tolangan_summa))
+        return '0.00'
 
     def get_oxirgiQarz(self, obj):
         return self.get_oxirgi_qarz(obj)
@@ -71,19 +82,48 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
         ).aggregate(
             total=Sum(ExpressionWrapper(F('umumiy_summa') - F('tolangan_summa'), output_field=DecimalField()))
         )['total'] or Decimal('0.00')
-        return max(Decimal('0.00'), order_qarz - obj.balans)
+        return str(max(Decimal('0.00'), order_qarz - obj.balans))
+
+    def get_qarzSummasi(self, obj):
+        return self.get_qarz_summasi(obj)
+
+    def get_qarz(self, obj):
+        return self.get_qarz_summasi(obj)
+
+    def get_nasiya_summasi(self, obj):
+        return self.get_qarz_summasi(obj)
+
+    def get_nasiyaSummasi(self, obj):
+        return self.get_qarz_summasi(obj)
+
+    def get_total_debt(self, obj):
+        return self.get_qarz_summasi(obj)
+
+    def get_totalDebt(self, obj):
+        return self.get_qarz_summasi(obj)
 
     def get_buyurtmalar_summasi(self, obj):
         from django.db.models import Sum
-        return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('umumiy_summa'))['total'] or Decimal('0.00')
+        val = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('umumiy_summa'))['total'] or Decimal('0.00')
+        return str(val)
+
+    def get_buyurtmalarSummasi(self, obj):
+        return self.get_buyurtmalar_summasi(obj)
 
     def get_tolovlar_summasi(self, obj):
         from django.db.models import Sum
-        return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('tolangan_summa'))['total'] or Decimal('0.00')
+        val = obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('tolangan_summa'))['total'] or Decimal('0.00')
+        return str(val)
+
+    def get_tolovlarSummasi(self, obj):
+        return self.get_tolovlar_summasi(obj)
 
     def get_tovarlar_soni(self, obj):
         from django.db.models import Sum
         return obj.xarid_buyurtmalari.exclude(holat='bekor_qilingan').aggregate(total=Sum('elementlar__miqdori'))['total'] or 0
+
+    def get_tovarlarSoni(self, obj):
+        return self.get_tovarlar_soni(obj)
 
     def to_internal_value(self, data):
         def clean_val(val):
