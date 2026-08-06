@@ -49,7 +49,7 @@ class TaminotchiSerializer(XSSSanitizerMixin, serializers.ModelSerializer):
             'id', 'biznes', 'nomi', 'telefon', 'tel_raqami', 'telRaqami', 'telefon_raqam', 'telefonlar', 
             'eslatma', 'boshliq', 'boshliq_ismi', 'boshliqIsmi', 'boshliq_nomi', 'boshliqNomi', 'director', 'director_name', 'directorName', 'yuridik_nomi',
             'manzil', 'yuridik_manzil', 'mamlakat', 'pochta_indeksi',
-            'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'fayl', 'hujjat', 'hujjatlar', 'balans', 'is_active',
+            'bank_hisob_raqami', 'bank_nomi_filiali', 'inn', 'mfo', 'fayl', 'hujjat', 'hujjatlar', 'balans', 'standart_ustama', 'is_active',
             'oxirgi_qarz', 'oxirgiQarz', 'jami_qarz', 'jamiQarz', 'qarz_summasi', 'qarzSummasi', 'qarz', 'nasiya_summasi', 'nasiyaSummasi', 'total_debt', 'totalDebt',
             'buyurtmalar_summasi', 'buyurtmalarSummasi', 'tolovlar_summasi', 'tolovlarSummasi', 'tovarlar_soni', 'tovarlarSoni',
             'dastlabki_qarz', 'dastlabkiQarz', 'boshlangich_qarz', 'boshlangichQarz', 'yaratilgan_vaqt', 'yangilangan_vaqt'

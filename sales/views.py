@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -1029,8 +1030,11 @@ class SaleViewSet(viewsets.ModelViewSet):
                 })
             return Response(data, status=status.HTTP_200_OK)
         except Exception as e:
-            with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'w', encoding='utf-8') as f:
-                f.write(f"Exception in products_analytics: {str(e)}\nTraceback: {traceback.format_exc()}\n")
+            try:
+                with open('error_log.txt', 'a', encoding='utf-8') as f:
+                    f.write(f"Exception in products_analytics: {str(e)}\nTraceback: {traceback.format_exc()}\n")
+            except Exception:
+                pass
             raise
 
     @action(detail=False, methods=['get'])
@@ -1114,8 +1118,11 @@ class SaleViewSet(viewsets.ModelViewSet):
         products = Mahsulot.objects.filter(biznes=biznes) if biznes else Mahsulot.objects.none()
 
         # Debug logging to identify empty queryset
-        with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
-            f.write(f"abc_xyz: user={user}, authenticated={user.is_authenticated}, hasattr_xodim={hasattr(user, 'xodim')}, biznes={biznes}, count={products.count()}\n")
+        try:
+            with open('error_log.txt', 'a', encoding='utf-8') as f:
+                f.write(f"abc_xyz: user={user}, authenticated={user.is_authenticated}, hasattr_xodim={hasattr(user, 'xodim')}, biznes={biznes}, count={products.count()}\n")
+        except Exception:
+            pass
 
         categories_def = {
             'AX': {
@@ -1394,12 +1401,18 @@ class XarajatViewSet(viewsets.ModelViewSet):
         try:
             serializer = self.get_serializer(data=request.data)
             if not serializer.is_valid():
-                with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'w', encoding='utf-8') as f:
-                    f.write(f"Payload: {request.data}\nErrors: {serializer.errors}\n")
+                try:
+                    with open('error_log.txt', 'a', encoding='utf-8') as f:
+                        f.write(f"Payload: {request.data}\nErrors: {serializer.errors}\n")
+                except Exception:
+                    pass
             return super().create(request, *args, **kwargs)
         except Exception as e:
-            with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'w', encoding='utf-8') as f:
-                f.write(f"Exception: {str(e)}\nTraceback: {traceback.format_exc()}\n")
+            try:
+                with open('error_log.txt', 'a', encoding='utf-8') as f:
+                    f.write(f"Exception: {str(e)}\nTraceback: {traceback.format_exc()}\n")
+            except Exception:
+                pass
             raise
 
     def perform_create(self, serializer):

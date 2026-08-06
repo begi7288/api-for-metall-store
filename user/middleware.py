@@ -1,4 +1,5 @@
 import os
+from django.conf import settings
 
 class RequestDebugLoggingMiddleware:
     def __init__(self, get_response):
@@ -6,8 +7,9 @@ class RequestDebugLoggingMiddleware:
 
     def __call__(self, request):
         try:
-            os.makedirs(r"c:\Temir Dokon\temirdokon_v1\scratch", exist_ok=True)
-            with open(r"c:\Temir Dokon\temirdokon_v1\scratch\login_debug.log", "a", encoding="utf-8") as f:
+            log_dir = os.path.join(settings.BASE_DIR, "scratch")
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, "login_debug.log"), "a", encoding="utf-8") as f:
                 f.write(f"\nIncoming Request: {request.method} {request.path}\n")
         except:
             pass
@@ -15,7 +17,8 @@ class RequestDebugLoggingMiddleware:
         response = self.get_response(request)
 
         try:
-            with open(r"c:\Temir Dokon\temirdokon_v1\scratch\login_debug.log", "a", encoding="utf-8") as f:
+            log_dir = os.path.join(settings.BASE_DIR, "scratch")
+            with open(os.path.join(log_dir, "login_debug.log"), "a", encoding="utf-8") as f:
                 f.write(f"Response: {response.status_code}\n")
         except:
             pass

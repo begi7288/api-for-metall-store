@@ -30,14 +30,14 @@ class LoginAPIView(APIView):
 
     def post(self, request, *args, **kwargs):
         try:
-            with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+            with open('error_log.txt', 'a', encoding='utf-8') as f:
                 f.write(f"\nLOGIN_POST: data={request.data}\n")
         except Exception:
             pass
         serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             try:
-                with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+                with open('error_log.txt', 'a', encoding='utf-8') as f:
                     f.write(f"LOGIN_VALIDATION_ERRORS: {serializer.errors}\n")
             except Exception:
                 pass
@@ -192,7 +192,7 @@ class LoginAPIView(APIView):
             if not user_obj:
                 check_password(parol, "pbkdf2_sha256$260000$dummy$dummyhash=")
                 try:
-                    with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
+                    with open('error_log.txt', 'a', encoding='utf-8') as f:
                         f.write(f"LOGIN_ERROR: user_obj is None. Raw phone={raw_phone}, parsed={telefon_raqam}, parol={parol}\n")
                 except Exception:
                     pass

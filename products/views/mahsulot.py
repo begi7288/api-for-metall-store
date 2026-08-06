@@ -166,8 +166,11 @@ class MahsulotViewSet(viewsets.ModelViewSet):
         is_active_param = request.query_params.get('is_active')
         if is_active_param is not None:
             queryset = self.filter_queryset(self.get_queryset())
-            with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
-                f.write(f"Mahsulot list: user={request.user}, is_active={is_active_param}, count={queryset.count()}\n")
+            try:
+                with open('error_log.txt', 'a', encoding='utf-8') as f:
+                    f.write(f"Mahsulot list: user={request.user}, is_active={is_active_param}, count={queryset.count()}\n")
+            except Exception:
+                pass
 
         if request.query_params.get('export') in ['csv', 'excel']:
             import csv

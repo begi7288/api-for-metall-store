@@ -416,8 +416,11 @@ class ArchiveListAPIView(APIView):
         archive_items = []
 
         # Debug logging to identify archive list behavior
-        with open('c:/Temir Dokon/temirdokon_v1/error_log.txt', 'a', encoding='utf-8') as f:
-            f.write(f"ArchiveListAPIView request by {user}: authenticated={user.is_authenticated}, hasattr_xodim={hasattr(user, 'xodim')}, biznes={biznes}\n")
+        try:
+            with open('error_log.txt', 'a', encoding='utf-8') as f:
+                f.write(f"ArchiveListAPIView request by {user}: authenticated={user.is_authenticated}, hasattr_xodim={hasattr(user, 'xodim')}, biznes={biznes}\n")
+        except Exception:
+            pass
         
         # Inactive Products
         products = Mahsulot.objects.filter(is_active=False).prefetch_related('qoldiqlar', 'shtrix_kodlar').order_by('-yangilangan_vaqt')
